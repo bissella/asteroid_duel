@@ -62,6 +62,25 @@ ASTEROID_SPAWN_PADDING = 100  # Min distance from edge or player to spawn
 ASTEROID_COUNT = 8  # Initial number of asteroids
 ASTEROID_IMG = "meteorBrown_med1.png"  # Placeholder image
 
+# Enemy ship settings
+MOTHERSHIP_SIZE = 100
+MOTHERSHIP_HEALTH = 500
+MOTHERSHIP_ACC = 50  # Less nimble than player ships
+MOTHERSHIP_FRICTION = -0.05
+MOTHERSHIP_SPAWN_DELAY = 30000  # 30 seconds between mothership spawns
+MOTHERSHIP_SPAWN_CHANCE = 0.3  # 30% chance to spawn a mothership when timer expires
+
+ENEMY_SHIP_SIZE = 20
+ENEMY_SHIP_HEALTH = 30
+ENEMY_SHIP_ACC = 150
+ENEMY_SHIP_FRICTION = -0.1
+ENEMY_SHIP_DAMAGE = 10
+ENEMY_SHIP_SPAWN_RATE = 3000  # Spawn a new enemy every 3 seconds from mothership
+ENEMY_SWARM_DISTANCE = 200  # Distance at which enemy ships start swarming players
+ENEMY_MAX_SPEED = 200
+ENEMY_COLOR = (255, 100, 0)  # Orange
+MOTHERSHIP_COLOR = (255, 50, 50)  # Red
+
 # Explosion settings
 EXPLOSION_DURATION = 500  # milliseconds for the primitive explosion
 

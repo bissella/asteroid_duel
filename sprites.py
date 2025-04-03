@@ -1,17 +1,20 @@
 import pygame as pg
-from pygame.locals import *
-import random
 import math
+import random
 from settings import (
     PLAYER_ACC, PLAYER_FRICTION, PLAYER_ROT_SPEED, PLAYER_SIZE,
     PLAYER_SHOOT_DELAY, PLAYER_DECELERATION,
     LASER_SPEED,
     EXPLOSION_DURATION,
     WIDTH, HEIGHT,
-    RED, GREEN, WHITE
+    RED, GREEN, WHITE,
+    MOTHERSHIP_SIZE, MOTHERSHIP_HEALTH, MOTHERSHIP_COLOR, MOTHERSHIP_ACC, MOTHERSHIP_FRICTION,
+    ENEMY_SHIP_SIZE, ENEMY_SHIP_HEALTH, ENEMY_COLOR, ENEMY_SHIP_ACC, ENEMY_SHIP_FRICTION, ENEMY_MAX_SPEED, ENEMY_SWARM_DISTANCE, ENEMY_SHIP_SPAWN_RATE
 )
 
+# Define constants
 vec = pg.math.Vector2
+SRCALPHA = 0x00010000  # Define SRCALPHA constant
 
 class Player(pg.sprite.Sprite):
     def __init__(self, game, pos, player_controls, color, player_num=1):
@@ -28,7 +31,7 @@ class Player(pg.sprite.Sprite):
         game.players.add(self)
         
         # Create a triangular ship
-        self.original_image = pg.Surface((self.size, self.size), pg.SRCALPHA)
+        self.original_image = pg.Surface((self.size, self.size), flags=SRCALPHA)
         
         # Draw a triangle pointing upward
         points = [
@@ -171,7 +174,7 @@ class Laser(pg.sprite.Sprite):
         
         # Create a line for the laser
         self.width, self.height = 10, 4  # Laser dimensions
-        self.original_image = pg.Surface((self.width, self.height), pg.SRCALPHA)
+        self.original_image = pg.Surface((self.width, self.height), flags=SRCALPHA)
         pg.draw.rect(self.original_image, self.color, (0, 0, self.width, self.height))
         
         # Add a white outline to make the laser more visible
@@ -235,21 +238,27 @@ class Explosion(pg.sprite.Sprite):
         pg.sprite.Sprite.__init__(self)
         self.game = game
         self.game.all_sprites.add(self)
+        self.pos = vec(center)  # Add position vector for camera tracking
         
         # Create a circular explosion
-        self.image = pg.Surface((size, size), pg.SRCALPHA)  # Using SRCALPHA for transparency
+        self.image = pg.Surface((size, size), flags=SRCALPHA)  # Using SRCALPHA for transparency
         # Draw expanding circles
         pg.draw.circle(self.image, RED, (size//2, size//2), size//2)
         pg.draw.circle(self.image, GREEN, (size//2, size//2), size//3)
+        
         self.rect = self.image.get_rect()
         self.rect.center = center
-        self.spawn_time = pg.time.get_ticks()
-    
-    def update(self):
-        # Remove the explosion after its duration
-        now = pg.time.get_ticks()
-        if now - self.spawn_time > EXPLOSION_DURATION:
+        self.lifetime = 0
+        self.max_lifetime = EXPLOSION_DURATION  # Duration in milliseconds
+        
+    def update(self, dt):
+        self.lifetime += dt * 1000  # Convert to milliseconds
+        if self.lifetime >= self.max_lifetime:
             self.kill()
+        else:
+            # Fade out the explosion over time
+            alpha = 255 * (1 - self.lifetime / self.max_lifetime)
+            self.image.set_alpha(alpha)
 
 
 class Asteroid(pg.sprite.Sprite):
@@ -259,7 +268,7 @@ class Asteroid(pg.sprite.Sprite):
         self.size = random.randint(20, 50)
         
         # Create a circular asteroid
-        self.original_image = pg.Surface((self.size, self.size), pg.SRCALPHA)
+        self.original_image = pg.Surface((self.size, self.size), flags=SRCALPHA)
         pg.draw.circle(self.original_image, (150, 150, 150), (self.size // 2, self.size // 2), self.size // 2)
         
         # Add some details to make it look more like an asteroid
@@ -315,3 +324,196 @@ class Asteroid(pg.sprite.Sprite):
         
         # Update rect position
         self.rect.center = self.pos
+
+
+class MotherShip(pg.sprite.Sprite):
+    def __init__(self, game, pos=None):
+        self._layer = 2
+        pg.sprite.Sprite.__init__(self)
+        self.game = game
+        self.size = MOTHERSHIP_SIZE
+        self.health = MOTHERSHIP_HEALTH
+        
+        # Create a hexagonal mothership
+        self.original_image = pg.Surface((self.size, self.size), flags=SRCALPHA)
+        # Draw a hexagon
+        points = []
+        for i in range(6):
+            angle = math.radians(60 * i)
+            x = self.size // 2 + int(self.size // 2 * 0.8 * math.cos(angle))
+            y = self.size // 2 + int(self.size // 2 * 0.8 * math.sin(angle))
+            points.append((x, y))
+        pg.draw.polygon(self.original_image, MOTHERSHIP_COLOR, points)
+        
+        # Add some details to make it look more like a mothership
+        center = (self.size // 2, self.size // 2)
+        pg.draw.circle(self.original_image, (200, 200, 200), center, self.size // 4)
+        
+        self.image = self.original_image.copy()
+        self.rect = self.image.get_rect()
+        
+        # Set random position if not provided
+        if pos is None:
+            # Place the mothership at a random edge of the world
+            edge = random.randint(0, 3)  # 0: top, 1: right, 2: bottom, 3: left
+            if edge == 0:  # top
+                self.pos = vec(random.randint(0, WIDTH), 0)
+            elif edge == 1:  # right
+                self.pos = vec(WIDTH, random.randint(0, HEIGHT))
+            elif edge == 2:  # bottom
+                self.pos = vec(random.randint(0, WIDTH), HEIGHT)
+            else:  # left
+                self.pos = vec(0, random.randint(0, HEIGHT))
+        else:
+            self.pos = vec(pos)
+            
+        self.rect.center = self.pos
+        self.vel = vec(0, 0)
+        self.acc = vec(0, 0)
+        self.rot = 0
+        
+        # Spawn timer for enemy ships
+        self.last_spawn = pg.time.get_ticks()
+        
+        # Add to sprite groups
+        self.game.all_sprites.add(self)
+        self.game.enemies.add(self)
+        self.game.motherships.add(self)
+    
+    def update(self, dt):
+        # Slow random movement
+        self.acc = vec(random.uniform(-1, 1), random.uniform(-1, 1))
+        self.acc = self.acc.normalize() * MOTHERSHIP_ACC
+        
+        # Apply friction
+        self.acc += self.vel * MOTHERSHIP_FRICTION
+        
+        # Update velocity and position
+        self.vel += self.acc * dt
+        
+        # Limit maximum velocity
+        if self.vel.length() > 100:
+            self.vel.scale_to_length(100)
+            
+        self.pos += self.vel * dt
+        
+        # Wrap around screen edges
+        if self.pos.x > WIDTH:
+            self.pos.x = 0
+        if self.pos.x < 0:
+            self.pos.x = WIDTH
+        if self.pos.y > HEIGHT:
+            self.pos.y = 0
+        if self.pos.y < 0:
+            self.pos.y = HEIGHT
+            
+        self.rect.center = self.pos
+        
+        # Spawn enemy ships periodically
+        now = pg.time.get_ticks()
+        if now - self.last_spawn > ENEMY_SHIP_SPAWN_RATE:
+            self.last_spawn = now
+            EnemyShip(self.game, self.pos)
+    
+    def take_damage(self, amount):
+        self.health -= amount
+        if self.health <= 0:
+            # Create a large explosion
+            Explosion(self.game, self.pos, self.size)
+            self.kill()
+            
+            # Add score
+            self.game.score += 100
+
+
+class EnemyShip(pg.sprite.Sprite):
+    def __init__(self, game, pos):
+        self._layer = 2
+        pg.sprite.Sprite.__init__(self)
+        self.game = game
+        self.size = ENEMY_SHIP_SIZE
+        self.health = ENEMY_SHIP_HEALTH
+        
+        # Create a triangular enemy ship
+        self.original_image = pg.Surface((self.size, self.size), flags=SRCALPHA)
+        # Draw a triangle pointing upward
+        points = [
+            (self.size // 2, 0),  # Top vertex
+            (0, self.size),       # Bottom left
+            (self.size, self.size) # Bottom right
+        ]
+        pg.draw.polygon(self.original_image, ENEMY_COLOR, points)
+        
+        self.image = self.original_image.copy()
+        self.rect = self.image.get_rect()
+        self.pos = vec(pos)
+        self.rect.center = self.pos
+        self.vel = vec(random.uniform(-1, 1), random.uniform(-1, 1))
+        self.vel = self.vel.normalize() * random.randint(50, 100)
+        self.acc = vec(0, 0)
+        self.rot = 0
+        
+        # Add to sprite groups
+        self.game.all_sprites.add(self)
+        self.game.enemies.add(self)
+    
+    def update(self, dt):
+        # Find the closest player
+        target = None
+        closest_dist = float('inf')
+        
+        for player in self.game.players:
+            if player.alive():
+                dist = self.pos.distance_to(player.pos)
+                if dist < closest_dist:
+                    closest_dist = dist
+                    target = player
+        
+        # If a player is within swarm distance, move towards them
+        if target and closest_dist < ENEMY_SWARM_DISTANCE:
+            # Calculate direction to target
+            direction = (target.pos - self.pos).normalize()
+            self.acc = direction * ENEMY_SHIP_ACC
+            
+            # Update rotation to face the target
+            self.rot = math.degrees(math.atan2(-direction.y, direction.x)) - 90
+            self.image = pg.transform.rotate(self.original_image, self.rot)
+            self.rect = self.image.get_rect()
+        else:
+            # Random movement if no target in range
+            self.acc = vec(random.uniform(-0.5, 0.5), random.uniform(-0.5, 0.5))
+            self.acc = self.acc.normalize() * (ENEMY_SHIP_ACC / 2)
+        
+        # Apply friction
+        self.acc += self.vel * ENEMY_SHIP_FRICTION
+        
+        # Update velocity and position
+        self.vel += self.acc * dt
+        
+        # Limit maximum velocity
+        if self.vel.length() > ENEMY_MAX_SPEED:
+            self.vel.scale_to_length(ENEMY_MAX_SPEED)
+            
+        self.pos += self.vel * dt
+        
+        # Wrap around screen edges
+        if self.pos.x > WIDTH:
+            self.pos.x = 0
+        if self.pos.x < 0:
+            self.pos.x = WIDTH
+        if self.pos.y > HEIGHT:
+            self.pos.y = 0
+        if self.pos.y < 0:
+            self.pos.y = HEIGHT
+            
+        self.rect.center = self.pos
+    
+    def take_damage(self, amount):
+        self.health -= amount
+        if self.health <= 0:
+            # Create an explosion
+            Explosion(self.game, self.pos, self.size)
+            self.kill()
+            
+            # Add score
+            self.game.score += 10

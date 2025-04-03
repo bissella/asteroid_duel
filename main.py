@@ -4,9 +4,9 @@ from settings import (
     WIDTH, HEIGHT, TITLE, FPS, WORLD_WIDTH, WORLD_HEIGHT,
     BLACK, ASSET_FOLDER, PLAYER1_START, PLAYER2_START,
     PLAYER1_CONTROLS, PLAYER2_CONTROLS, RED, BLUE, ASTEROID_COUNT,
-    WHITE, YELLOW, BROWN, GREY
+    WHITE, YELLOW, BROWN, GREY, GREEN, MOTHERSHIP_SPAWN_DELAY, MOTHERSHIP_SPAWN_CHANCE, MOTHERSHIP_HEALTH, MOTHERSHIP_COLOR
 )
-from sprites import Player, Asteroid, Explosion
+from sprites import Player, Asteroid, Explosion, EnemyShip, MotherShip
 from camera import Camera
 import random
 
@@ -32,9 +32,17 @@ class Game:
         self.lasers = None
         self.lasers_p1 = None
         self.lasers_p2 = None
+        self.enemies = None
+        self.motherships = None
         self.player1 = None
         self.player2 = None
         self.camera = None
+        
+        # Game score
+        self.score = 0
+        
+        # Mothership spawn timer
+        self.last_mothership_spawn = 0
         
         # Initialize font
         self.font_name = pg.font.match_font('arial')
@@ -46,27 +54,32 @@ class Game:
         pass
 
     def new(self):
-        # Initialize game variables
+        # Start a new game
+        self.score = 0
+        
+        # Create sprite groups
         self.all_sprites = pg.sprite.LayeredUpdates()
         self.players = pg.sprite.Group()
         self.asteroids = pg.sprite.Group()
         self.lasers = pg.sprite.Group()
         self.lasers_p1 = pg.sprite.Group()
         self.lasers_p2 = pg.sprite.Group()
+        self.enemies = pg.sprite.Group()
+        self.motherships = pg.sprite.Group()
         
-        # Create the camera - use WIDTH and HEIGHT instead of WORLD dimensions
-        self.camera = Camera(WIDTH, HEIGHT)
-        
-        # Create players
-        self.player1 = Player(self, PLAYER1_START, PLAYER1_CONTROLS, RED, 1)
-        self.player2 = Player(self, PLAYER2_START, PLAYER2_CONTROLS, BLUE, 2)
+        # Create player objects
+        self.player1 = Player(self, PLAYER1_START, PLAYER1_CONTROLS, GREEN, 1)
+        self.player2 = Player(self, PLAYER2_START, PLAYER2_CONTROLS, RED, 2)
         
         # Create asteroids
         for _ in range(ASTEROID_COUNT):
             Asteroid(self)
+            
+        # Initialize mothership spawn timer
+        self.last_mothership_spawn = pg.time.get_ticks()
         
-        # Set the camera to follow the midpoint between players
-        self.camera.update_for_two_players(self.player1, self.player2)
+        # Create camera
+        self.camera = Camera(WORLD_WIDTH, WORLD_HEIGHT)
         
         # Start the game
         self.playing = True
@@ -88,19 +101,117 @@ class Game:
             if pg.time.get_ticks() % 1000 < 20:  # Print every ~1 second
                 print(f"FPS: {self.clock.get_fps():.1f}")
                 print(f"Player 1 pos: {self.player1.pos}, Player 2 pos: {self.player2.pos}")
-                print(f"Camera pos: {self.camera.camera.topleft}")
+                print(f"Camera pos: {self.camera.x:.0f}, {self.camera.y:.0f}")
 
     def update(self):
-        # Update all sprites
+        # Game loop - update
         self.all_sprites.update(self.dt)
         
-        # Update camera to follow both players
+        # Check for collisions between lasers and asteroids
+        for laser in self.lasers:
+            # Check collision with asteroids
+            hits = pg.sprite.spritecollide(laser, self.asteroids, False)
+            for hit in hits:
+                laser.kill()
+                hit.kill()
+                Explosion(self, hit.pos, hit.size)
+                # Spawn smaller asteroids
+                if hit.size > 20:
+                    for _ in range(2):
+                        Asteroid(self, hit.pos, hit.size // 2)
+                break
+                
+            # Check collision with enemy ships
+            hits = pg.sprite.spritecollide(laser, self.enemies, False)
+            for hit in hits:
+                laser.kill()
+                if isinstance(hit, MotherShip):
+                    hit.take_damage(10)  # Mothership takes less damage
+                else:
+                    hit.take_damage(30)  # Regular enemy ships take full damage
+                break
+                
+            # Check collision with players (can't hit yourself)
+            if laser in self.lasers_p1:
+                if pg.sprite.collide_rect(laser, self.player2) and self.player2.alive():
+                    laser.kill()
+                    self.player2.health -= 10
+                    if self.player2.health <= 0:
+                        self.player2.kill()
+                        Explosion(self, self.player2.pos, self.player2.size)
+            elif laser in self.lasers_p2:
+                if pg.sprite.collide_rect(laser, self.player1) and self.player1.alive():
+                    laser.kill()
+                    self.player1.health -= 10
+                    if self.player1.health <= 0:
+                        self.player1.kill()
+                        Explosion(self, self.player1.pos, self.player1.size)
+        
+        # Check for collisions between players and asteroids
+        for player in self.players:
+            if not player.alive():
+                continue
+                
+            hits = pg.sprite.spritecollide(player, self.asteroids, True)
+            for hit in hits:
+                player.health -= 20
+                Explosion(self, hit.pos, hit.size)
+                if player.health <= 0:
+                    player.kill()
+                    Explosion(self, player.pos, player.size)
+                    
+        # Check for collisions between players and enemy ships
+        for player in self.players:
+            if not player.alive():
+                continue
+                
+            hits = pg.sprite.spritecollide(player, self.enemies, False)
+            for hit in hits:
+                if isinstance(hit, MotherShip):
+                    player.health -= 30
+                    hit.take_damage(50)  # Player collision damages mothership
+                else:
+                    player.health -= 10
+                    hit.take_damage(100)  # Enemy ship destroyed on player collision
+                
+                if player.health <= 0:
+                    player.kill()
+                    Explosion(self, player.pos, player.size)
+                    
+        # Check for collisions between asteroids and enemy ships
+        for enemy in self.enemies:
+            hits = pg.sprite.spritecollide(enemy, self.asteroids, True)
+            for hit in hits:
+                Explosion(self, hit.pos, hit.size)
+                if isinstance(enemy, MotherShip):
+                    enemy.take_damage(20)  # Mothership takes less damage from asteroids
+                else:
+                    enemy.take_damage(100)  # Regular enemy ships are destroyed by asteroids
+        
+        # Spawn motherships periodically
+        now = pg.time.get_ticks()
+        if now - self.last_mothership_spawn > MOTHERSHIP_SPAWN_DELAY:
+            self.last_mothership_spawn = now
+            if random.random() < MOTHERSHIP_SPAWN_CHANCE and len(self.motherships) < 2:
+                MotherShip(self)
+                
+        # Update camera position
         if self.player1.alive() and self.player2.alive():
+            # If both players are alive, center camera between them
             self.camera.update_for_two_players(self.player1, self.player2)
         elif self.player1.alive():
+            # If only player 1 is alive, follow them
             self.camera.update(self.player1)
         elif self.player2.alive():
+            # If only player 2 is alive, follow them
             self.camera.update(self.player2)
+        else:
+            # If both players are dead, follow a random sprite if any exist
+            if len(self.all_sprites) > 0:
+                # Convert to list to use random.choice
+                sprites = list(self.all_sprites)
+                if sprites:
+                    self.camera.update(random.choice(sprites))
         
         # Collision detection is now handled in the Laser class update method
         
@@ -135,7 +246,7 @@ class Game:
             self.screen.blit(sprite.image, offset_pos)
             
             # Draw debug rectangle around sprites
-            pg.draw.rect(self.screen, (255, 0, 0), offset_pos, 1)  # Red outline for debugging
+            # pg.draw.rect(self.screen, (255, 0, 0), offset_pos, 1)  # Red outline for debugging
         
         # Draw player health bars
         if self.player1.alive():
@@ -150,6 +261,14 @@ class Game:
         self.draw_text(f"P1: {self.player1.pos.x:.0f}, {self.player1.pos.y:.0f}", 16, WHITE, 10, HEIGHT - 50)
         self.draw_text(f"P2: {self.player2.pos.x:.0f}, {self.player2.pos.y:.0f}", 16, WHITE, 10, HEIGHT - 30)
         self.draw_text(f"Camera: {self.camera.x:.0f}, {self.camera.y:.0f}", 16, WHITE, 10, HEIGHT - 70)
+        
+        # Draw score
+        self.draw_text(f"Score: {self.score}", 22, WHITE, WIDTH // 2, 10, align="center")
+        
+        # Draw mothership health if any exist
+        for i, mothership in enumerate(self.motherships):
+            self.draw_health_bar(self.screen, WIDTH // 2 - 50, 40 + i * 15, mothership.health / MOTHERSHIP_HEALTH * 100)
+            self.draw_text("Mothership", 15, MOTHERSHIP_COLOR, WIDTH // 2, 40 + i * 15, align="right")
         
         # Update the display
         pg.display.flip()
