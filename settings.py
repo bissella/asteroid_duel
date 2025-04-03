@@ -53,7 +53,7 @@ LASER_MAX_COOLDOWN = 1000  # Maximum delay
 LASER_IMG = "laserBlue01.png"  # Placeholder
 
 # Asteroid settings
-NUM_ASTEROIDS = 15
+# NUM_ASTEROIDS = 1000
 ASTEROID_SIZE_MIN = 20
 ASTEROID_SIZE_MAX = 50
 ASTEROID_SPEED_MAX = 100
@@ -68,7 +68,7 @@ MOTHERSHIP_HEALTH = 500
 MOTHERSHIP_ACC = 50  # Less nimble than player ships
 MOTHERSHIP_FRICTION = -0.05
 MOTHERSHIP_SPAWN_DELAY = 30000  # 30 seconds between mothership spawns
-MOTHERSHIP_SPAWN_CHANCE = 0.3  # 30% chance to spawn a mothership when timer expires
+MOTHERSHIP_SPAWN_CHANCE = 0.1  # 30% chance to spawn a mothership when timer expires
 
 ENEMY_SHIP_SIZE = 20
 ENEMY_SHIP_HEALTH = 30
@@ -83,6 +83,27 @@ MOTHERSHIP_COLOR = (255, 50, 50)  # Red
 
 # Explosion settings
 EXPLOSION_DURATION = 500  # milliseconds for the primitive explosion
+
+# PowerUp settings
+POWERUP_SIZE = 20
+POWERUP_DURATION = 20000  # 20 seconds for temporary powerups
+POWERUP_TYPES = ["health", "shotgun", "laser_stream", "shield"]
+POWERUP_COLORS = {
+    "health": (0, 255, 0),  # Green
+    "shotgun": (255, 165, 0),  # Orange
+    "laser_stream": (0, 191, 255),  # Deep Sky Blue
+    "shield": (138, 43, 226),  # Blue Violet
+}
+POWERUP_SPAWN_CHANCE = {
+    "asteroid": 1.0,  # 10% chance from asteroid
+    "mothership": 1.0,  # 100% chance from mothership
+}
+POWERUP_LIFETIME = (
+    10000  # How long a powerup stays on screen before disappearing (10 seconds)
+)
+POWERUP_SHOTGUN_SPREAD = 15  # Angle in degrees between shotgun lasers
+POWERUP_LASER_STREAM_DELAY = 100  # Delay between laser stream shots in milliseconds
+POWERUP_SHIELD_HEALTH = 50  # Additional health provided by shield
 
 # Boundary
 BOUNDARY_COLOR = RED

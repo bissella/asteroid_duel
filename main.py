@@ -1,14 +1,17 @@
 import os
-import pygame as pg
-from settings import (
-    WIDTH, HEIGHT, TITLE, FPS, WORLD_WIDTH, WORLD_HEIGHT,
-    BLACK, ASSET_FOLDER, PLAYER1_START, PLAYER2_START,
-    PLAYER1_CONTROLS, PLAYER2_CONTROLS, RED, BLUE, ASTEROID_COUNT,
-    WHITE, YELLOW, BROWN, GREY, GREEN, MOTHERSHIP_SPAWN_DELAY, MOTHERSHIP_SPAWN_CHANCE, MOTHERSHIP_HEALTH, MOTHERSHIP_COLOR
-)
-from sprites import Player, Asteroid, Explosion, EnemyShip, MotherShip
-from camera import Camera
 import random
+
+import pygame as pg
+
+from camera import Camera
+from settings import (
+    WIDTH, HEIGHT, FPS, TITLE, ASSET_FOLDER,
+    BLACK, WHITE, RED, GREEN, BLUE, YELLOW,
+    WORLD_WIDTH, WORLD_HEIGHT,
+    PLAYER1_START, PLAYER2_START,
+    POWERUP_TYPES, POWERUP_COLORS, POWERUP_SPAWN_CHANCE
+)
+from sprites import Asteroid, Explosion, MotherShip, Player, PowerUp
 
 # pylint: disable=no-member
 
@@ -23,8 +26,10 @@ class Game:
         self.running = True
         self.playing = False
         self.dt = 0.0
-        self.asset_folder = os.path.join(os.path.dirname(__file__), ASSET_FOLDER)  # pylint: disable=no-member
-        
+        self.asset_folder = os.path.join(
+            os.path.dirname(__file__), ASSET_FOLDER
+        )  # pylint: disable=no-member
+
         # Initialize sprite groups in __init__ to address pylint warnings
         self.all_sprites = None
         self.players = None
@@ -34,19 +39,31 @@ class Game:
         self.lasers_p2 = None
         self.enemies = None
         self.motherships = None
+        self.powerups = None  # New group for powerups
         self.player1 = None
         self.player2 = None
         self.camera = None
-        
+
         # Game score
         self.score = 0
-        
+
         # Mothership spawn timer
         self.last_mothership_spawn = 0
-        
+
+        # Asteroid respawn timer and settings
+        self.last_asteroid_spawn = 0
+        self.asteroid_spawn_delay = (
+            5000  # Initial delay between asteroid spawns (5 seconds)
+        )
+        self.min_asteroid_spawn_delay = 2000  # Minimum delay (2 seconds)
+        self.asteroid_spawn_rate_decrease = (
+            -10
+        )  # Decrease spawn delay by this amount each spawn
+        self.max_asteroids = 30  # Maximum number of asteroids allowed at once
+
         # Initialize font
-        self.font_name = pg.font.match_font('arial')
-        
+        self.font_name = pg.font.match_font("arial")
+
         self.load_assets()
 
     def load_assets(self):
@@ -56,7 +73,7 @@ class Game:
     def new(self):
         # Start a new game
         self.score = 0
-        
+
         # Create sprite groups
         self.all_sprites = pg.sprite.LayeredUpdates()
         self.players = pg.sprite.Group()
@@ -66,24 +83,41 @@ class Game:
         self.lasers_p2 = pg.sprite.Group()
         self.enemies = pg.sprite.Group()
         self.motherships = pg.sprite.Group()
-        
+        self.powerups = pg.sprite.Group()  # Initialize powerups group
+
         # Create player objects
-        self.player1 = Player(self, PLAYER1_START, PLAYER1_CONTROLS, GREEN, 1)
-        self.player2 = Player(self, PLAYER2_START, PLAYER2_CONTROLS, RED, 2)
+        player1_controls = {
+            'up': pg.K_w,
+            'down': pg.K_s,
+            'left': pg.K_a,
+            'right': pg.K_d,
+            'fire': pg.K_SPACE
+        }
         
+        player2_controls = {
+            'up': pg.K_UP,
+            'down': pg.K_DOWN,
+            'left': pg.K_LEFT,
+            'right': pg.K_RIGHT,
+            'fire': pg.K_RCTRL
+        }
+        
+        self.player1 = Player(self, PLAYER1_START, player1_controls, GREEN, 1)
+        self.player2 = Player(self, PLAYER2_START, player2_controls, RED, 2)
+
         # Create asteroids
-        for _ in range(ASTEROID_COUNT):
+        for _ in range(10):
             Asteroid(self)
-            
+
         # Initialize mothership spawn timer
         self.last_mothership_spawn = pg.time.get_ticks()
-        
+
         # Spawn initial mothership
         MotherShip(self)
-        
+
         # Create camera
         self.camera = Camera(WORLD_WIDTH, WORLD_HEIGHT)
-        
+
         # Start the game
         self.playing = True
         print("Game initialized with players and asteroids")
@@ -91,25 +125,29 @@ class Game:
     def run(self):
         # Print debug info
         print("Game started. Players and asteroids initialized.")
-        print(f"Player 1 position: {self.player1.pos}, Player 2 position: {self.player2.pos}")
+        print(
+            f"Player 1 position: {self.player1.pos}, Player 2 position: {self.player2.pos}"
+        )
         print(f"Number of asteroids: {len(self.asteroids)}")
-        
+
         while self.playing:
             self.dt = self.clock.tick(FPS) / 1000  # Convert to seconds
             self.events()
             self.update()
             self.draw()
-            
+
             # Add debug info
             if pg.time.get_ticks() % 1000 < 20:  # Print every ~1 second
                 print(f"FPS: {self.clock.get_fps():.1f}")
-                print(f"Player 1 pos: {self.player1.pos}, Player 2 pos: {self.player2.pos}")
+                print(
+                    f"Player 1 pos: {self.player1.pos}, Player 2 pos: {self.player2.pos}"
+                )
                 print(f"Camera pos: {self.camera.x:.0f}, {self.camera.y:.0f}")
 
     def update(self):
         # Game loop - update
         self.all_sprites.update(self.dt)
-        
+
         # Check for collisions between lasers and asteroids
         for laser in self.lasers:
             # Check collision with asteroids
@@ -118,12 +156,24 @@ class Game:
                 laser.kill()
                 hit.kill()
                 Explosion(self, hit.pos, hit.size)
+
+                # Chance to spawn a powerup from destroyed asteroid
+                if random.random() < POWERUP_SPAWN_CHANCE["asteroid"]:
+                    # Create powerup at asteroid position with a slight offset for visibility
+                    powerup_pos = hit.pos + pg.math.Vector2(
+                        random.uniform(-10, 10), random.uniform(-10, 10)
+                    )
+                    PowerUp(self, powerup_pos)
+                    print(f"PowerUp spawned at {powerup_pos} from asteroid")
+
                 # Spawn smaller asteroids
                 if hit.size > 20:
                     for _ in range(2):
                         Asteroid(self, hit.pos, hit.size // 2)
+                # Increase score
+                self.score += 10
                 break
-                
+
             # Check collision with enemy ships
             hits = pg.sprite.spritecollide(laser, self.enemies, False)
             for hit in hits:
@@ -133,7 +183,7 @@ class Game:
                 else:
                     hit.take_damage(30)  # Regular enemy ships take full damage
                 break
-                
+
             # Check collision with players (can't hit yourself)
             if laser in self.lasers_p1:
                 if pg.sprite.collide_rect(laser, self.player2) and self.player2.alive():
@@ -149,12 +199,12 @@ class Game:
                     if self.player1.health <= 0:
                         self.player1.kill()
                         Explosion(self, self.player1.pos, self.player1.size)
-        
+
         # Check for collisions between players and asteroids
         for player in self.players:
             if not player.alive():
                 continue
-                
+
             hits = pg.sprite.spritecollide(player, self.asteroids, True)
             for hit in hits:
                 player.health -= 20
@@ -162,12 +212,12 @@ class Game:
                 if player.health <= 0:
                     player.kill()
                     Explosion(self, player.pos, player.size)
-                    
+
         # Check for collisions between players and enemy ships
         for player in self.players:
             if not player.alive():
                 continue
-                
+
             hits = pg.sprite.spritecollide(player, self.enemies, False)
             for hit in hits:
                 if isinstance(hit, MotherShip):
@@ -176,11 +226,11 @@ class Game:
                 else:
                     player.health -= 10
                     hit.take_damage(100)  # Enemy ship destroyed on player collision
-                
+
                 if player.health <= 0:
                     player.kill()
                     Explosion(self, player.pos, player.size)
-                    
+
         # Check for collisions between asteroids and enemy ships
         for enemy in self.enemies:
             hits = pg.sprite.spritecollide(enemy, self.asteroids, True)
@@ -189,15 +239,21 @@ class Game:
                 if isinstance(enemy, MotherShip):
                     enemy.take_damage(20)  # Mothership takes less damage from asteroids
                 else:
-                    enemy.take_damage(100)  # Regular enemy ships are destroyed by asteroids
-        
-        # Spawn motherships periodically
+                    enemy.take_damage(
+                        100
+                    )  # Regular enemy ships are destroyed by asteroids
+
+        # Spawn new asteroids over time
+        self.handle_asteroid_spawning()
+
+        # Check for mothership spawn
         now = pg.time.get_ticks()
-        if now - self.last_mothership_spawn > MOTHERSHIP_SPAWN_DELAY:
+        if now - self.last_mothership_spawn > 10000:
             self.last_mothership_spawn = now
-            if random.random() < MOTHERSHIP_SPAWN_CHANCE and len(self.motherships) < 2:
+            if random.random() < 0.1 and len(self.motherships) < 1:
                 MotherShip(self)
-                
+                print("Mothership spawned")
+
         # Update camera position
         if self.player1.alive() and self.player2.alive():
             # If both players are alive, center camera between them
@@ -215,41 +271,113 @@ class Game:
                 sprites = list(self.all_sprites)
                 if sprites:
                     self.camera.update(random.choice(sprites))
-        
-        # Collision detection is now handled in the Laser class update method
-        
+
         # Check for game over condition
         if not self.player1.alive() and not self.player2.alive():
             self.playing = False
             print("Game over - both players destroyed")
 
+    def handle_asteroid_spawning(self):
+        """Spawn new asteroids at random intervals"""
+        now = pg.time.get_ticks()
+
+        # Only spawn if we're below the maximum number of asteroids
+        if len(self.asteroids) < 10:
+            # Check if it's time to spawn a new asteroid
+            if now - self.last_asteroid_spawn > 2000:
+                self.last_asteroid_spawn = now
+
+                # Create a new asteroid at a random position away from players
+                self.spawn_asteroid_away_from_players()
+
+                print(
+                    f"Asteroid spawned. Current count: {len(self.asteroids)}"
+                )
+
+    def spawn_asteroid_away_from_players(self):
+        """Spawn an asteroid at a random position, but not too close to players"""
+        min_distance = 200  # Minimum distance from players
+        max_attempts = 10  # Maximum attempts to find a suitable position
+
+        for _ in range(max_attempts):
+            # Generate random position within world bounds
+            x = random.randint(0, WORLD_WIDTH)
+            y = random.randint(0, WORLD_HEIGHT)
+            pos = pg.math.Vector2(x, y)
+
+            # Check distance from players
+            safe_distance = True
+            for player in self.players:
+                if player.alive() and player.pos.distance_to(pos) < min_distance:
+                    safe_distance = False
+                    break
+
+            # If position is safe, create asteroid and return
+            if safe_distance:
+                size = random.randint(20, 50)
+                Asteroid(self, pos, size)
+                return
+
+        # If we couldn't find a safe position after max attempts, just spawn it randomly
+        x = random.randint(0, WORLD_WIDTH)
+        y = random.randint(0, WORLD_HEIGHT)
+        pos = pg.math.Vector2(x, y)
+        size = random.randint(20, 50)
+        Asteroid(self, pos, size)
+
     def mothership_destroyed(self):
         """Called when a mothership is destroyed. Respawns dead players and increases score."""
         # Increase score
         self.score += 100
-        
+
         print("Mothership destroyed! Checking for dead players to respawn...")
-        
+
+        # Spawn a powerup at the mothership's position
+        # Always spawn a powerup when a mothership is destroyed
+        if hasattr(self, "last_mothership_pos"):
+            # Make the powerup more visible by increasing its size
+            powerup_type = random.choice(POWERUP_TYPES)
+            PowerUp(self, self.last_mothership_pos, powerup_type)
+            print(f"PowerUp {powerup_type} spawned at mothership position {self.last_mothership_pos}")
+
         # Respawn player 1 if dead
         if not self.player1.alive():
             print("Respawning Player 1")
             # Create a new player at a random position near the center
-            spawn_pos = pg.math.Vector2(WIDTH/2 + random.randint(-100, 100), 
-                           HEIGHT/2 + random.randint(-100, 100))
-            self.player1 = Player(self, spawn_pos, PLAYER1_CONTROLS, GREEN, 1)
-            
+            spawn_pos = pg.math.Vector2(
+                WIDTH / 2 + random.randint(-100, 100),
+                HEIGHT / 2 + random.randint(-100, 100),
+            )
+            player1_controls = {
+                'up': pg.K_w,
+                'down': pg.K_s,
+                'left': pg.K_a,
+                'right': pg.K_d,
+                'fire': pg.K_SPACE
+            }
+            self.player1 = Player(self, spawn_pos, player1_controls, GREEN, 1)
+
             # Create a respawn effect
             for _ in range(3):
                 Explosion(self, spawn_pos, random.randint(20, 40))
-        
+
         # Respawn player 2 if dead
         if not self.player2.alive():
             print("Respawning Player 2")
             # Create a new player at a random position near the center
-            spawn_pos = pg.math.Vector2(WIDTH/2 + random.randint(-100, 100), 
-                           HEIGHT/2 + random.randint(-100, 100))
-            self.player2 = Player(self, spawn_pos, PLAYER2_CONTROLS, RED, 2)
-            
+            spawn_pos = pg.math.Vector2(
+                WIDTH / 2 + random.randint(-100, 100),
+                HEIGHT / 2 + random.randint(-100, 100),
+            )
+            player2_controls = {
+                'up': pg.K_UP,
+                'down': pg.K_DOWN,
+                'left': pg.K_LEFT,
+                'right': pg.K_RIGHT,
+                'fire': pg.K_RCTRL
+            }
+            self.player2 = Player(self, spawn_pos, player2_controls, RED, 2)
+
             # Create a respawn effect
             for _ in range(3):
                 Explosion(self, spawn_pos, random.randint(20, 40))
@@ -264,47 +392,58 @@ class Game:
             # Player shooting is now handled in the Player class update
 
     def draw(self):
-        # Fill the screen with black
-        self.screen.fill(BLACK)  # Clear the screen
+        # Game loop - render
+        self.screen.fill(BLACK)
         
-        # Draw grid for debugging (optional)
+        # Draw grid for reference
         self.draw_grid()
         
-        # Draw all sprites with camera offset
+        # Apply camera offset to all sprites
         for sprite in self.all_sprites:
-            # Calculate camera offset position
-            offset_pos = sprite.rect.copy()
-            offset_pos.center = self.camera.apply(sprite.pos)
-            
-            # Draw sprite at offset position
-            self.screen.blit(sprite.image, offset_pos)
-            
-            # Draw debug rectangle around sprites
-            # pg.draw.rect(self.screen, (255, 0, 0), offset_pos, 1)  # Red outline for debugging
+            # Special handling for players to draw ghost ships when near boundaries
+            if isinstance(sprite, Player):
+                sprite.draw(self.screen)
+            else:
+                self.screen.blit(sprite.image, sprite.rect)
         
         # Draw player health bars
         if self.player1.alive():
             self.draw_health_bar(self.screen, 10, 10, self.player1.health)
         if self.player2.alive():
             self.draw_health_bar(self.screen, WIDTH - 110, 10, self.player2.health)
-        
-        # Draw FPS counter
-        self.draw_text(f"FPS: {int(self.clock.get_fps())}", 22, WHITE, WIDTH - 60, HEIGHT - 30)
-        
-        # Draw player positions for debugging
-        self.draw_text(f"P1: {self.player1.pos.x:.0f}, {self.player1.pos.y:.0f}", 16, WHITE, 10, HEIGHT - 50)
-        self.draw_text(f"P2: {self.player2.pos.x:.0f}, {self.player2.pos.y:.0f}", 16, WHITE, 10, HEIGHT - 30)
-        self.draw_text(f"Camera: {self.camera.x:.0f}, {self.camera.y:.0f}", 16, WHITE, 10, HEIGHT - 70)
+            
+        # Draw player powerup indicators
+        if self.player1.alive():
+            # Draw powerup indicators for player 1
+            y_offset = 40
+            if self.player1.active_powerups["shotgun"]:
+                self.draw_text("SHOTGUN", 20, POWERUP_COLORS["shotgun"], 60, y_offset)
+                y_offset += 25
+            if self.player1.active_powerups["laser_stream"]:
+                self.draw_text("LASER STREAM", 20, POWERUP_COLORS["laser_stream"], 60, y_offset)
+                y_offset += 25
+            if self.player1.active_powerups["shield"]:
+                self.draw_text(f"SHIELD: {self.player1.shield_health}", 20, POWERUP_COLORS["shield"], 60, y_offset)
+                
+        if self.player2.alive():
+            # Draw powerup indicators for player 2
+            y_offset = 40
+            if self.player2.active_powerups["shotgun"]:
+                self.draw_text("SHOTGUN", 20, POWERUP_COLORS["shotgun"], WIDTH - 60, y_offset)
+                y_offset += 25
+            if self.player2.active_powerups["laser_stream"]:
+                self.draw_text("LASER STREAM", 20, POWERUP_COLORS["laser_stream"], WIDTH - 60, y_offset)
+                y_offset += 25
+            if self.player2.active_powerups["shield"]:
+                self.draw_text(f"SHIELD: {self.player2.shield_health}", 20, POWERUP_COLORS["shield"], WIDTH - 60, y_offset)
         
         # Draw score
-        self.draw_text(f"Score: {self.score}", 22, WHITE, WIDTH // 2, 10, align="center")
+        self.draw_text(f"Score: {self.score}", 30, WHITE, WIDTH // 2, 10, align="center")
         
-        # Draw mothership health if any exist
-        for i, mothership in enumerate(self.motherships):
-            self.draw_health_bar(self.screen, WIDTH // 2 - 50, 40 + i * 15, mothership.health / MOTHERSHIP_HEALTH * 100)
-            self.draw_text("Mothership", 15, MOTHERSHIP_COLOR, WIDTH // 2, 40 + i * 15, align="right")
+        # Draw FPS
+        self.draw_text(f"FPS: {int(self.clock.get_fps())}", 20, WHITE, WIDTH - 50, HEIGHT - 20, align="right")
         
-        # Update the display
+        # Update display
         pg.display.flip()
 
     def draw_grid(self):
@@ -313,11 +452,15 @@ class Game:
         for x in range(0, WORLD_WIDTH, grid_size):
             x_screen = x - self.camera.camera.x
             if 0 <= x_screen < WIDTH:
-                pg.draw.line(self.screen, (20, 20, 20), (x_screen, 0), (x_screen, HEIGHT))
+                pg.draw.line(
+                    self.screen, (20, 20, 20), (x_screen, 0), (x_screen, HEIGHT)
+                )
         for y in range(0, WORLD_HEIGHT, grid_size):
             y_screen = y - self.camera.camera.y
             if 0 <= y_screen < HEIGHT:
-                pg.draw.line(self.screen, (20, 20, 20), (0, y_screen), (WIDTH, y_screen))
+                pg.draw.line(
+                    self.screen, (20, 20, 20), (0, y_screen), (WIDTH, y_screen)
+                )
 
     def draw_health_bar(self, screen, x, y, health):
         """Draw a health bar at the specified position"""
@@ -362,51 +505,70 @@ class Game:
         """Game start screen"""
         # Fill screen with black
         self.screen.fill(BLACK)
-        
+
         # Draw game title
         self.draw_text(TITLE, 48, WHITE, WIDTH / 2, HEIGHT / 4)
-        
+
         # Draw instructions
-        self.draw_text("Two-Player Space Shooter", 22, WHITE, WIDTH / 2, HEIGHT / 2 - 40)
-        self.draw_text("Player 1: WASD to move, SPACE to shoot", 22, RED, WIDTH / 2, HEIGHT / 2)
-        self.draw_text("Player 2: Arrow keys to move, Right CTRL to shoot", 22, BLUE, WIDTH / 2, HEIGHT / 2 + 30)
-        
+        self.draw_text(
+            "Two-Player Space Shooter", 22, WHITE, WIDTH / 2, HEIGHT / 2 - 40
+        )
+        self.draw_text(
+            "Player 1: WASD to move, SPACE to shoot", 22, RED, WIDTH / 2, HEIGHT / 2
+        )
+        self.draw_text(
+            "Player 2: Arrow keys to move, Right CTRL to shoot",
+            22,
+            BLUE,
+            WIDTH / 2,
+            HEIGHT / 2 + 30,
+        )
+
         # Draw a pulsing "Press any key" message
         pulse = (pg.time.get_ticks() % 1000) / 1000  # Value between 0 and 1
         pulse_color = [int(c * (0.5 + 0.5 * pulse)) for c in YELLOW]
-        self.draw_text("Press any key to begin", 22, pulse_color, WIDTH / 2, HEIGHT * 3 / 4)
-        
+        self.draw_text(
+            "Press any key to begin", 22, pulse_color, WIDTH / 2, HEIGHT * 3 / 4
+        )
+
         # Draw sample ships
         # Player 1 ship (red triangle)
         ship_size = 30
         p1_ship = pg.Surface((ship_size, ship_size), pg.SRCALPHA)
-        points = [(ship_size//2, 0), (0, ship_size), (ship_size, ship_size)]
+        points = [(ship_size // 2, 0), (0, ship_size), (ship_size, ship_size)]
         pg.draw.polygon(p1_ship, RED, points)
         self.screen.blit(p1_ship, (WIDTH // 4 - ship_size // 2, HEIGHT * 3 / 5))
-        
+
         # Player 2 ship (blue triangle)
         p2_ship = pg.Surface((ship_size, ship_size), pg.SRCALPHA)
         pg.draw.polygon(p2_ship, BLUE, points)
         self.screen.blit(p2_ship, (WIDTH * 3 // 4 - ship_size // 2, HEIGHT * 3 / 5))
-        
+
         # Draw sample asteroid
         asteroid_size = 40
         asteroid = pg.Surface((asteroid_size, asteroid_size), pg.SRCALPHA)
-        pg.draw.circle(asteroid, BROWN, (asteroid_size//2, asteroid_size//2), asteroid_size//2)
+        pg.draw.circle(
+            asteroid,
+            (139, 69, 19),
+            (asteroid_size // 2, asteroid_size // 2),
+            asteroid_size // 2,
+        )
         # Add some grey craters
         for _ in range(3):
             crater_size = asteroid_size // 8
-            crater_pos = (random.randint(crater_size, asteroid_size-crater_size), 
-                         random.randint(crater_size, asteroid_size-crater_size))
-            pg.draw.circle(asteroid, GREY, crater_pos, crater_size)
+            crater_pos = (
+                random.randint(crater_size, asteroid_size - crater_size),
+                random.randint(crater_size, asteroid_size - crater_size),
+            )
+            pg.draw.circle(asteroid, (128, 128, 128), crater_pos, crater_size)
         self.screen.blit(asteroid, (WIDTH // 2 - asteroid_size // 2, HEIGHT * 3 / 5))
-        
+
         # Update the display
         pg.display.flip()
-        
+
         # Print debug info
         print("Start screen displayed. Waiting for key press...")
-        
+
         # Wait for a key press to start
         self.wait_for_key()
         print("Key pressed. Starting game...")
@@ -415,17 +577,19 @@ class Game:
         """Game over screen"""
         if not self.running:
             return
-            
+
         # Fill screen with black
         self.screen.fill(BLACK)
-        
+
         # Draw game over text
         self.draw_text("GAME OVER", 48, WHITE, WIDTH / 2, HEIGHT / 4)
-        self.draw_text("Press any key to play again", 22, WHITE, WIDTH / 2, HEIGHT * 3 / 4)
-        
+        self.draw_text(
+            "Press any key to play again", 22, WHITE, WIDTH / 2, HEIGHT * 3 / 4
+        )
+
         # Update the display
         pg.display.flip()
-        
+
         # Wait for a key press to restart
         self.wait_for_key()
 

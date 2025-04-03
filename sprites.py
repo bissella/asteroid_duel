@@ -9,7 +9,9 @@ from settings import (
     WIDTH, HEIGHT,
     RED, GREEN, WHITE,
     MOTHERSHIP_SIZE, MOTHERSHIP_HEALTH, MOTHERSHIP_COLOR, MOTHERSHIP_ACC, MOTHERSHIP_FRICTION,
-    ENEMY_SHIP_SIZE, ENEMY_SHIP_HEALTH, ENEMY_COLOR, ENEMY_SHIP_ACC, ENEMY_SHIP_FRICTION, ENEMY_MAX_SPEED, ENEMY_SWARM_DISTANCE, ENEMY_SHIP_SPAWN_RATE
+    ENEMY_SHIP_SIZE, ENEMY_SHIP_HEALTH, ENEMY_COLOR, ENEMY_SHIP_ACC, ENEMY_SHIP_FRICTION, ENEMY_MAX_SPEED, ENEMY_SWARM_DISTANCE,
+    POWERUP_TYPES, POWERUP_SIZE, POWERUP_COLORS, WORLD_WIDTH, WORLD_HEIGHT,
+    POWERUP_SHOTGUN_SPREAD, POWERUP_LASER_STREAM_DELAY, POWERUP_SHIELD_HEALTH
 )
 
 # Define constants
@@ -49,12 +51,26 @@ class Player(pg.sprite.Sprite):
         
         # Set initial position and movement variables
         self.pos = vec(pos)
+        self.true_pos = vec(pos)  # Position for collision detection
         self.vel = vec(0, 0)
         self.acc = vec(0, 0)
         self.rect.center = self.pos
         self.rot = 0
         self.health = 100
         self.last_shot = 0
+        
+        # Ghost ship for boundary transitions
+        self.ghost_active = False
+        self.ghost_pos = vec(0, 0)
+        
+        # Powerup tracking
+        self.active_powerups = {
+            "shotgun": False,
+            "laser_stream": False,
+            "shield": False
+        }
+        self.shield_health = 0
+        self.last_stream_shot = 0  # For laser stream powerup
         
         # Debug information
         print(f"Player {player_num} initialized at position {self.pos}")
@@ -109,26 +125,57 @@ class Player(pg.sprite.Sprite):
         
         # Update position based on velocity
         self.pos += self.vel * dt
+        self.true_pos = vec(self.pos)  # Store true position before wrapping
         
-        # Wrap around screen edges
-        if self.pos.x > WIDTH:
-            self.pos.x = 0
-        if self.pos.x < 0:
-            self.pos.x = WIDTH
-        if self.pos.y > HEIGHT:
-            self.pos.y = 0
-        if self.pos.y < 0:
-            self.pos.y = HEIGHT
+        # Handle screen wrapping with a buffer zone for smooth transitions
+        buffer = self.size * 1.5  # Buffer size based on player size
+        transition_zone = self.size * 3  # Zone where ghost ship appears
+        
+        # Reset ghost status
+        self.ghost_active = False
+        
+        # Check if player is near a boundary and set up ghost ship
+        if self.pos.x > WIDTH - transition_zone:
+            # Near right edge, show ghost on left
+            self.ghost_active = True
+            self.ghost_pos = vec(self.pos.x - WIDTH, self.pos.y)
+        elif self.pos.x < transition_zone:
+            # Near left edge, show ghost on right
+            self.ghost_active = True
+            self.ghost_pos = vec(self.pos.x + WIDTH, self.pos.y)
+            
+        if self.pos.y > HEIGHT - transition_zone:
+            # Near bottom edge, show ghost on top
+            self.ghost_active = True
+            self.ghost_pos = vec(self.pos.x, self.pos.y - HEIGHT)
+        elif self.pos.y < transition_zone:
+            # Near top edge, show ghost on bottom
+            self.ghost_active = True
+            self.ghost_pos = vec(self.pos.x, self.pos.y + HEIGHT)
+        
+        # Wrap around screen edges with buffer
+        if self.pos.x > WIDTH + buffer:
+            self.pos.x = -buffer
+        elif self.pos.x < -buffer:
+            self.pos.x = WIDTH + buffer
+        
+        if self.pos.y > HEIGHT + buffer:
+            self.pos.y = -buffer
+        elif self.pos.y < -buffer:
+            self.pos.y = HEIGHT + buffer
         
         # Update rect position to match the new position
         self.rect.center = self.pos
         
-        # Handle shooting
+        # Handle shooting based on powerups
+        now = pg.time.get_ticks()
         if keys[self.player_controls['fire']]:
-            now = pg.time.get_ticks()
-            if now - self.last_shot > PLAYER_SHOOT_DELAY:
-                self.last_shot = now
-                Laser(self.game, self.pos, self.rot, self.color, self)
+            if self.active_powerups["shotgun"]:
+                self.fire_shotgun(now)
+            elif self.active_powerups["laser_stream"]:
+                self.fire_laser_stream(now)
+            else:
+                self.fire_normal_laser(now)
         
         # Check for collisions with asteroids
         asteroid_hits = pg.sprite.spritecollide(self, self.game.asteroids, False)
@@ -140,17 +187,118 @@ class Player(pg.sprite.Sprite):
                 asteroid.vel = bounce_dir
                 print(f"Player {self.player_num} collided with asteroid")
                 
+        # Check for powerup collisions
+        self.check_powerup_collisions()
+                
         # Debug info occasionally
         if pg.time.get_ticks() % 1000 < 10:  # Print only occasionally
             print(f"Player {self.player_num} at {self.pos}, vel: {self.vel}")
     
+    def draw(self, screen):
+        """Draw the player and ghost ship if active"""
+        # Draw the main ship
+        screen.blit(self.image, self.rect)
+        
+        # Draw ghost ship if active
+        if self.ghost_active:
+            ghost_rect = self.rect.copy()
+            ghost_rect.center = self.ghost_pos
+            
+            # Draw with reduced alpha to indicate it's a ghost
+            ghost_img = self.image.copy()
+            ghost_img.set_alpha(150)  # Semi-transparent
+            screen.blit(ghost_img, ghost_rect)
+            
+        # Draw shield if active
+        if self.active_powerups["shield"]:
+            shield_radius = self.size * 1.5
+            shield_surface = pg.Surface((shield_radius * 2, shield_radius * 2), pg.SRCALPHA)
+            
+            # Draw shield with transparency based on remaining health
+            alpha = min(150, int(150 * (self.shield_health / POWERUP_SHIELD_HEALTH)))
+            shield_color = (*POWERUP_COLORS["shield"][:3], alpha)
+            
+            pg.draw.circle(shield_surface, shield_color, (shield_radius, shield_radius), shield_radius)
+            shield_rect = shield_surface.get_rect(center=self.rect.center)
+            screen.blit(shield_surface, shield_rect)
+    
     def take_damage(self, amount):
         """Reduce player health and handle destruction if health <= 0"""
-        self.health -= amount
-        print(f"Player {self.player_num} took {amount} damage, health: {self.health}")
-        if self.health <= 0:
-            self.kill()
-            print(f"Player {self.player_num} destroyed!")
+        # If shield is active, damage shield first
+        if self.active_powerups["shield"] and self.shield_health > 0:
+            self.shield_health -= amount
+            print(f"Player {self.player_num} shield took damage. Shield health: {self.shield_health}")
+            
+            # If shield is depleted, remove it
+            if self.shield_health <= 0:
+                self.active_powerups["shield"] = False
+                print(f"Player {self.player_num} shield depleted")
+        else:
+            # No shield or shield depleted, damage player directly
+            self.health -= amount
+            print(f"Player {self.player_num} took {amount} damage, health: {self.health}")
+            
+            # Check if player is destroyed
+            if self.health <= 0:
+                self.kill()
+                print(f"Player {self.player_num} destroyed")
+                # Create explosion effect
+                Explosion(self.game, self.pos, self.size * 2)
+    
+    def fire_normal_laser(self, now):
+        """Fire a single laser with normal cooldown"""
+        if now - self.last_shot > PLAYER_SHOOT_DELAY:
+            self.last_shot = now
+            Laser(self.game, self.pos, self.rot, self.color, self)
+    
+    def fire_shotgun(self, now):
+        """Fire three lasers in a spread pattern"""
+        if now - self.last_shot > PLAYER_SHOOT_DELAY:
+            self.last_shot = now
+            # Center laser
+            Laser(self.game, self.pos, self.rot, self.color, self)
+            # Left laser
+            Laser(self.game, self.pos, self.rot + POWERUP_SHOTGUN_SPREAD, self.color, self)
+            # Right laser
+            Laser(self.game, self.pos, self.rot - POWERUP_SHOTGUN_SPREAD, self.color, self)
+    
+    def fire_laser_stream(self, now):
+        """Fire a continuous stream of lasers with reduced cooldown"""
+        if now - self.last_stream_shot > POWERUP_LASER_STREAM_DELAY:
+            self.last_stream_shot = now
+            Laser(self.game, self.pos, self.rot, self.color, self)
+    
+    def check_powerup_collisions(self):
+        """Check if player has collected any powerups"""
+        hits = pg.sprite.spritecollide(self, self.game.powerups, True)
+        for powerup in hits:
+            self.apply_powerup(powerup.type)
+            
+    def apply_powerup(self, powerup_type):
+        """Apply the effect of a collected powerup"""
+        if powerup_type == "health":
+            # Restore health to full
+            old_health = self.health
+            self.health = 100
+            print(f"Player {self.player_num} health restored from {old_health} to {self.health}")
+            
+        elif powerup_type == "shotgun":
+            # Enable shotgun mode
+            self.active_powerups["shotgun"] = True
+            self.active_powerups["laser_stream"] = False  # Disable other weapon powerups
+            print(f"Player {self.player_num} activated shotgun powerup")
+            
+        elif powerup_type == "laser_stream":
+            # Enable laser stream mode
+            self.active_powerups["laser_stream"] = True
+            self.active_powerups["shotgun"] = False  # Disable other weapon powerups
+            print(f"Player {self.player_num} activated laser stream powerup")
+            
+        elif powerup_type == "shield":
+            # Add shield or restore shield health
+            self.active_powerups["shield"] = True
+            self.shield_health = POWERUP_SHIELD_HEALTH
+            print(f"Player {self.player_num} activated shield powerup. Shield health: {self.shield_health}")
 
 
 class Laser(pg.sprite.Sprite):
@@ -359,92 +507,115 @@ class Asteroid(pg.sprite.Sprite):
 
 
 class MotherShip(pg.sprite.Sprite):
+    """Large enemy ship that spawns smaller enemy ships"""
     def __init__(self, game, pos=None):
         self._layer = 2
         pg.sprite.Sprite.__init__(self)
         self.game = game
         self.size = MOTHERSHIP_SIZE
-        self.health = MOTHERSHIP_HEALTH
-        
-        # Create a hexagonal mothership
-        self.original_image = pg.Surface((self.size, self.size), flags=SRCALPHA)
-        # Draw a hexagon
-        points = []
-        for i in range(6):
-            angle_deg = 60 * i - 30
-            angle_rad = math.radians(angle_deg)
-            point = (self.size // 2 + int(self.size // 2 * 0.9 * math.cos(angle_rad)),
-                    self.size // 2 + int(self.size // 2 * 0.9 * math.sin(angle_rad)))
-            points.append(point)
-        pg.draw.polygon(self.original_image, MOTHERSHIP_COLOR, points)
-        
-        # Add some details to make it look more like a mothership
-        center = (self.size // 2, self.size // 2)
-        pg.draw.circle(self.original_image, (255, 255, 255), center, self.size // 5)
-        
-        self.image = self.original_image.copy()
-        self.rect = self.image.get_rect()
-        
-        # Set position
-        if pos is None:
-            # Spawn at a random position near the edge of the world
-            edge = random.choice(['top', 'right', 'bottom', 'left'])
-            padding = 200  # Distance from the edge
-            if edge == 'top':
-                self.pos = vec(random.randint(padding, WIDTH - padding), padding)
-            elif edge == 'right':
-                self.pos = vec(WIDTH - padding, random.randint(padding, HEIGHT - padding))
-            elif edge == 'bottom':
-                self.pos = vec(random.randint(padding, WIDTH - padding), HEIGHT - padding)
-            else:  # left
-                self.pos = vec(padding, random.randint(padding, HEIGHT - padding))
-        else:
-            self.pos = vec(pos)
-        
-        self.rect.center = self.pos
-        
-        # Movement variables
-        self.vel = vec(0, 0)
-        self.acc = vec(0, 0)
-        self.rot = 0
         
         # Add to sprite groups
-        self.game.all_sprites.add(self)
-        self.game.motherships.add(self)
-        self.game.enemies.add(self)
+        game.all_sprites.add(self)
+        game.enemies.add(self)
+        game.motherships.add(self)
         
-        # Enemy ship spawning
-        self.last_spawn = pg.time.get_ticks()
+        # Create a circular mothership
+        self.image = pg.Surface((self.size * 2, self.size * 2), flags=SRCALPHA)
+        pg.draw.circle(self.image, MOTHERSHIP_COLOR, (self.size, self.size), self.size)
         
-        print(f"Mothership spawned at position {self.pos}")
-    
-    def update(self, dt):
-        # Slowly move towards the center of the map
-        target = vec(WIDTH / 2, HEIGHT / 2)
-        self.acc = (target - self.pos).normalize() * MOTHERSHIP_ACC
+        # Add details to make it look more like a mothership
+        # Draw a smaller circle in the center
+        pg.draw.circle(self.image, (200, 200, 200), (self.size, self.size), self.size // 2)
         
-        # Apply acceleration and friction
-        self.vel += self.acc * dt
-        self.vel *= (1 - MOTHERSHIP_FRICTION * dt)
+        # Draw some "windows" around the edge
+        for angle in range(0, 360, 45):
+            x = self.size + int(math.cos(math.radians(angle)) * (self.size * 0.7))
+            y = self.size + int(math.sin(math.radians(angle)) * (self.size * 0.7))
+            pg.draw.circle(self.image, (255, 255, 0), (x, y), self.size // 8)
         
-        # Move the mothership
-        self.pos += self.vel * dt
+        self.rect = self.image.get_rect()
+        
+        # Set initial position and movement variables
+        if pos:
+            self.pos = vec(pos)
+        else:
+            # Spawn at a random edge of the screen
+            side = random.randint(0, 3)
+            if side == 0:  # Top
+                self.pos = vec(random.randint(0, WIDTH), -self.size)
+            elif side == 1:  # Right
+                self.pos = vec(WIDTH + self.size, random.randint(0, HEIGHT))
+            elif side == 2:  # Bottom
+                self.pos = vec(random.randint(0, WIDTH), HEIGHT + self.size)
+            else:  # Left
+                self.pos = vec(-self.size, random.randint(0, HEIGHT))
+        
+        self.vel = vec(0, 0)
+        self.acc = vec(0, 0)
         self.rect.center = self.pos
         
-        # Spawn enemy ships periodically
-        now = pg.time.get_ticks()
-        if now - self.last_spawn > ENEMY_SHIP_SPAWN_RATE:
-            self.last_spawn = now
-            # Spawn an enemy ship
-            EnemyShip(self.game, self.pos)
+        # Mothership health
+        self.health = MOTHERSHIP_HEALTH
+        
+        # Enemy ship spawn timer
+        self.last_spawn = pg.time.get_ticks()
+        self.spawn_delay = 5000  # 5 seconds between enemy ship spawns
+        
+        print(f"Mothership spawned at {self.pos}")
     
-    def take_damage(self, damage):
-        self.health -= damage
+    def update(self, dt):
+        # Movement AI: Move toward the center of the screen, then wander
+        target = vec(WIDTH / 2, HEIGHT / 2)
+        
+        # Calculate direction to target
+        self.acc = (target - self.pos).normalize() * MOTHERSHIP_ACC
+        
+        # Apply some randomness to movement
+        self.acc += vec(random.uniform(-0.5, 0.5), random.uniform(-0.5, 0.5))
+        
+        # Apply friction
+        self.acc += self.vel * MOTHERSHIP_FRICTION
+        
+        # Update velocity and position
+        self.vel += self.acc * dt
+        self.pos += self.vel * dt
+        
+        # Wrap around screen edges
+        if self.pos.x > WIDTH + self.size:
+            self.pos.x = -self.size
+        if self.pos.x < -self.size:
+            self.pos.x = WIDTH + self.size
+        if self.pos.y > HEIGHT + self.size:
+            self.pos.y = -self.size
+        if self.pos.y < -self.size:
+            self.pos.y = HEIGHT + self.size
+        
+        # Update rect position
+        self.rect.center = self.pos
+        
+        # Spawn enemy ships
+        now = pg.time.get_ticks()
+        if now - self.last_spawn > self.spawn_delay:
+            self.last_spawn = now
+            EnemyShip(self.game, self.pos)
+            print(f"Enemy ship spawned from mothership at {self.pos}")
+    
+    def take_damage(self, amount):
+        """Reduce mothership health and handle destruction if health <= 0"""
+        self.health -= amount
+        print(f"Mothership took {amount} damage, health: {self.health}")
+        
         if self.health <= 0:
-            # Create explosion
-            Explosion(self.game, self.pos, self.size)
+            # Store position before destroying for powerup spawning
+            self.game.last_mothership_pos = vec(self.pos)
             
-            # Signal to the game that a mothership was destroyed
+            self.kill()
+            print("Mothership destroyed!")
+            
+            # Create a large explosion
+            Explosion(self.game, self.pos, self.size * 2)
+            
+            # Notify game that mothership was destroyed
             self.game.mothership_destroyed()
             
             # Spawn two new motherships when destroyed
@@ -557,3 +728,87 @@ class EnemyShip(pg.sprite.Sprite):
             
             # Add score
             self.game.score += 10
+
+
+class PowerUp(pg.sprite.Sprite):
+    """PowerUp class for various player enhancements"""
+    def __init__(self, game, pos, powerup_type=None):
+        self._layer = 3  # Increased layer to appear above most objects
+        pg.sprite.Sprite.__init__(self)
+        self.game = game
+        self.type = powerup_type or random.choice(POWERUP_TYPES)
+        self.pos = vec(pos)
+        self.vel = vec(random.uniform(-20, 20), random.uniform(-20, 20))  # Small random movement
+        self.size = int(POWERUP_SIZE * 1.5)  # Increased size for better visibility, convert to int
+        self.color = POWERUP_COLORS[self.type]
+        
+        # Create sprite groups
+        game.all_sprites.add(self)
+        game.powerups.add(self)
+        
+        # Create a circular powerup with an icon
+        self.image = pg.Surface((self.size * 2, self.size * 2), flags=SRCALPHA)
+        pg.draw.circle(self.image, self.color, (self.size, self.size), self.size)
+        
+        # Add a white outline
+        pg.draw.circle(self.image, WHITE, (self.size, self.size), self.size, 3)  # Thicker outline
+        
+        # Add an icon based on powerup type
+        if self.type == "health":
+            # Draw a plus sign
+            pg.draw.line(self.image, WHITE, (self.size, self.size - self.size//2), 
+                         (self.size, self.size + self.size//2), 4)  # Thicker lines
+            pg.draw.line(self.image, WHITE, (self.size - self.size//2, self.size), 
+                         (self.size + self.size//2, self.size), 4)  # Thicker lines
+        elif self.type == "shotgun":
+            # Draw three lines representing spread shots
+            pg.draw.line(self.image, WHITE, (self.size - self.size//2, self.size), 
+                         (self.size + self.size//2, self.size), 3)  # Thicker lines
+            pg.draw.line(self.image, WHITE, (self.size - self.size//2, self.size + self.size//3), 
+                         (self.size + self.size//2, self.size - self.size//3), 3)  # Thicker lines
+            pg.draw.line(self.image, WHITE, (self.size - self.size//2, self.size - self.size//3), 
+                         (self.size + self.size//2, self.size + self.size//3), 3)  # Thicker lines
+        elif self.type == "laser_stream":
+            # Draw multiple short lines representing stream
+            for i in range(-self.size//2, self.size//2, 4):
+                pg.draw.line(self.image, WHITE, (self.size - self.size//2, self.size + i), 
+                             (self.size + self.size//2, self.size + i), 3)  # Thicker lines
+        elif self.type == "shield":
+            # Draw a circle representing shield
+            pg.draw.circle(self.image, WHITE, (self.size, self.size), self.size//2, 3)  # Thicker lines
+        
+        self.rect = self.image.get_rect()
+        self.rect.center = self.pos
+        
+        # Set spawn time for animation effects
+        self.spawn_time = pg.time.get_ticks()
+        
+        print(f"PowerUp {self.type} created at {self.pos}")
+    
+    def update(self, dt):
+        # Move with slight drift
+        self.pos += self.vel * dt
+        
+        # Apply friction to slow down
+        self.vel *= 0.98
+        
+        # Wrap around screen edges
+        if self.pos.x > WORLD_WIDTH:
+            self.pos.x = 0
+        if self.pos.x < 0:
+            self.pos.x = WORLD_WIDTH
+        if self.pos.y > WORLD_HEIGHT:
+            self.pos.y = 0
+        if self.pos.y < 0:
+            self.pos.y = WORLD_HEIGHT
+        
+        # Update rect position
+        self.rect.center = self.pos
+        
+        # Make the powerup pulse/rotate for visibility
+        # More pronounced pulsing effect
+        scale = 0.3 * math.sin(pg.time.get_ticks() * 0.01) + 1.0
+        center = self.rect.center
+        self.image = pg.transform.rotozoom(self.image, 2, scale)  # Faster rotation
+        self.rect = self.image.get_rect()
+        self.rect.center = center
