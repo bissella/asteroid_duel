@@ -78,6 +78,9 @@ class Game:
         # Initialize mothership spawn timer
         self.last_mothership_spawn = pg.time.get_ticks()
         
+        # Spawn initial mothership
+        MotherShip(self)
+        
         # Create camera
         self.camera = Camera(WORLD_WIDTH, WORLD_HEIGHT)
         
@@ -219,6 +222,37 @@ class Game:
         if not self.player1.alive() and not self.player2.alive():
             self.playing = False
             print("Game over - both players destroyed")
+
+    def mothership_destroyed(self):
+        """Called when a mothership is destroyed. Respawns dead players and increases score."""
+        # Increase score
+        self.score += 100
+        
+        print("Mothership destroyed! Checking for dead players to respawn...")
+        
+        # Respawn player 1 if dead
+        if not self.player1.alive():
+            print("Respawning Player 1")
+            # Create a new player at a random position near the center
+            spawn_pos = pg.math.Vector2(WIDTH/2 + random.randint(-100, 100), 
+                           HEIGHT/2 + random.randint(-100, 100))
+            self.player1 = Player(self, spawn_pos, PLAYER1_CONTROLS, GREEN, 1)
+            
+            # Create a respawn effect
+            for _ in range(3):
+                Explosion(self, spawn_pos, random.randint(20, 40))
+        
+        # Respawn player 2 if dead
+        if not self.player2.alive():
+            print("Respawning Player 2")
+            # Create a new player at a random position near the center
+            spawn_pos = pg.math.Vector2(WIDTH/2 + random.randint(-100, 100), 
+                           HEIGHT/2 + random.randint(-100, 100))
+            self.player2 = Player(self, spawn_pos, PLAYER2_CONTROLS, RED, 2)
+            
+            # Create a respawn effect
+            for _ in range(3):
+                Explosion(self, spawn_pos, random.randint(20, 40))
 
     def events(self):
         # Game Loop - Events

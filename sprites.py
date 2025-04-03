@@ -221,7 +221,7 @@ class Laser(pg.sprite.Sprite):
             for hit in asteroid_hits:
                 print(f"Laser hit asteroid at {hit.pos}")
                 # Spawn new asteroid to replace the destroyed one
-                Asteroid(self.game)
+                hit.split()
         
         # Check for collisions with players (only if not the player who fired)
         for player in self.game.players:
@@ -262,23 +262,33 @@ class Explosion(pg.sprite.Sprite):
 
 
 class Asteroid(pg.sprite.Sprite):
-    def __init__(self, game, pos=None):
+    def __init__(self, game, pos=None, size=None):
         pg.sprite.Sprite.__init__(self)
         self.game = game
-        self.size = random.randint(20, 50)
+        
+        # Set size - either provided or random
+        if size is None:
+            self.size = random.randint(20, 50)
+        else:
+            self.size = size
         
         # Create a circular asteroid
         self.original_image = pg.Surface((self.size, self.size), flags=SRCALPHA)
         pg.draw.circle(self.original_image, (150, 150, 150), (self.size // 2, self.size // 2), self.size // 2)
         
         # Add some details to make it look more like an asteroid
-        for _ in range(4):
-            offset = random.randint(3, self.size // 4)
-            angle = random.randint(0, 360)
-            x = self.size // 2 + offset * math.cos(math.radians(angle))
-            y = self.size // 2 + offset * math.sin(math.radians(angle))
-            radius = random.randint(2, self.size // 5)
-            pg.draw.circle(self.original_image, (100, 100, 100), (int(x), int(y)), radius)
+        # Only add details if the asteroid is large enough
+        if self.size >= 15:
+            detail_count = min(4, max(1, self.size // 10))  # Scale details with size
+            for _ in range(detail_count):
+                # Ensure we don't get a division by zero or empty range
+                max_offset = max(3, self.size // 4)
+                offset = random.randint(2, max_offset)
+                angle = random.randint(0, 360)
+                x = self.size // 2 + offset * math.cos(math.radians(angle))
+                y = self.size // 2 + offset * math.sin(math.radians(angle))
+                radius = max(1, random.randint(1, self.size // 5))
+                pg.draw.circle(self.original_image, (100, 100, 100), (int(x), int(y)), radius)
         
         # Add a white outline to make the asteroid more visible
         pg.draw.circle(self.original_image, WHITE, (self.size // 2, self.size // 2), self.size // 2, 1)
@@ -299,31 +309,53 @@ class Asteroid(pg.sprite.Sprite):
         self.rect.center = self.pos
         
         # Set random velocity
-        self.vel = vec(random.uniform(-100, 100), random.uniform(-100, 100))
+        angle = random.uniform(0, 2 * math.pi)
+        speed = random.uniform(30, 100)
+        self.vel = vec(speed * math.cos(angle), speed * math.sin(angle))
         
         # Add to sprite groups
         self.game.all_sprites.add(self)
         self.game.asteroids.add(self)
         
         # Debug info
-        print(f"Asteroid created at position [{self.pos.x:.0f}, {self.pos.y:.0f}] with velocity [{self.vel.x:.4f}, {self.vel.y:.4f}]")
+        if not pos:  # Only print for newly spawned asteroids, not splits
+            print(f"Asteroid created at position {[int(self.pos.x), int(self.pos.y)]} with velocity {[round(self.vel.x, 4), round(self.vel.y, 4)]}")
     
     def update(self, dt):
-        # Update position based on velocity
+        # Update position
         self.pos += self.vel * dt
+        self.rect.center = self.pos
         
         # Wrap around screen edges
-        if self.pos.x > WIDTH:
-            self.pos.x = 0
-        if self.pos.x < 0:
-            self.pos.x = WIDTH
-        if self.pos.y > HEIGHT:
-            self.pos.y = 0
-        if self.pos.y < 0:
-            self.pos.y = HEIGHT
-        
-        # Update rect position
-        self.rect.center = self.pos
+        if self.pos.x < -self.size:
+            self.pos.x = WIDTH + self.size
+        elif self.pos.x > WIDTH + self.size:
+            self.pos.x = -self.size
+        if self.pos.y < -self.size:
+            self.pos.y = HEIGHT + self.size
+        elif self.pos.y > HEIGHT + self.size:
+            self.pos.y = -self.size
+    
+    def split(self):
+        """Split the asteroid into two smaller ones if it's large enough"""
+        if self.size > 15:  # Only split if the asteroid is big enough
+            # Create two smaller asteroids
+            for _ in range(2):
+                # Create a new asteroid at the same position but with a smaller size
+                offset = vec(random.randint(-10, 10), random.randint(-10, 10))
+                new_pos = self.pos + offset
+                new_size = max(10, self.size // 2)  # Ensure minimum size
+                Asteroid(self.game, new_pos, new_size)
+            
+            # Create a small explosion
+            Explosion(self.game, self.pos, self.size // 2)
+            
+            # Remove this asteroid
+            self.kill()
+        else:
+            # If too small, just create an explosion and remove
+            Explosion(self.game, self.pos, self.size)
+            self.kill()
 
 
 class MotherShip(pg.sprite.Sprite):
@@ -339,91 +371,99 @@ class MotherShip(pg.sprite.Sprite):
         # Draw a hexagon
         points = []
         for i in range(6):
-            angle = math.radians(60 * i)
-            x = self.size // 2 + int(self.size // 2 * 0.8 * math.cos(angle))
-            y = self.size // 2 + int(self.size // 2 * 0.8 * math.sin(angle))
-            points.append((x, y))
+            angle_deg = 60 * i - 30
+            angle_rad = math.radians(angle_deg)
+            point = (self.size // 2 + int(self.size // 2 * 0.9 * math.cos(angle_rad)),
+                    self.size // 2 + int(self.size // 2 * 0.9 * math.sin(angle_rad)))
+            points.append(point)
         pg.draw.polygon(self.original_image, MOTHERSHIP_COLOR, points)
         
         # Add some details to make it look more like a mothership
         center = (self.size // 2, self.size // 2)
-        pg.draw.circle(self.original_image, (200, 200, 200), center, self.size // 4)
+        pg.draw.circle(self.original_image, (255, 255, 255), center, self.size // 5)
         
         self.image = self.original_image.copy()
         self.rect = self.image.get_rect()
         
-        # Set random position if not provided
+        # Set position
         if pos is None:
-            # Place the mothership at a random edge of the world
-            edge = random.randint(0, 3)  # 0: top, 1: right, 2: bottom, 3: left
-            if edge == 0:  # top
-                self.pos = vec(random.randint(0, WIDTH), 0)
-            elif edge == 1:  # right
-                self.pos = vec(WIDTH, random.randint(0, HEIGHT))
-            elif edge == 2:  # bottom
-                self.pos = vec(random.randint(0, WIDTH), HEIGHT)
+            # Spawn at a random position near the edge of the world
+            edge = random.choice(['top', 'right', 'bottom', 'left'])
+            padding = 200  # Distance from the edge
+            if edge == 'top':
+                self.pos = vec(random.randint(padding, WIDTH - padding), padding)
+            elif edge == 'right':
+                self.pos = vec(WIDTH - padding, random.randint(padding, HEIGHT - padding))
+            elif edge == 'bottom':
+                self.pos = vec(random.randint(padding, WIDTH - padding), HEIGHT - padding)
             else:  # left
-                self.pos = vec(0, random.randint(0, HEIGHT))
+                self.pos = vec(padding, random.randint(padding, HEIGHT - padding))
         else:
             self.pos = vec(pos)
-            
+        
         self.rect.center = self.pos
+        
+        # Movement variables
         self.vel = vec(0, 0)
         self.acc = vec(0, 0)
         self.rot = 0
         
-        # Spawn timer for enemy ships
-        self.last_spawn = pg.time.get_ticks()
-        
         # Add to sprite groups
         self.game.all_sprites.add(self)
-        self.game.enemies.add(self)
         self.game.motherships.add(self)
+        self.game.enemies.add(self)
+        
+        # Enemy ship spawning
+        self.last_spawn = pg.time.get_ticks()
+        
+        print(f"Mothership spawned at position {self.pos}")
     
     def update(self, dt):
-        # Slow random movement
-        self.acc = vec(random.uniform(-1, 1), random.uniform(-1, 1))
-        self.acc = self.acc.normalize() * MOTHERSHIP_ACC
+        # Slowly move towards the center of the map
+        target = vec(WIDTH / 2, HEIGHT / 2)
+        self.acc = (target - self.pos).normalize() * MOTHERSHIP_ACC
         
-        # Apply friction
-        self.acc += self.vel * MOTHERSHIP_FRICTION
-        
-        # Update velocity and position
+        # Apply acceleration and friction
         self.vel += self.acc * dt
+        self.vel *= (1 - MOTHERSHIP_FRICTION * dt)
         
-        # Limit maximum velocity
-        if self.vel.length() > 100:
-            self.vel.scale_to_length(100)
-            
+        # Move the mothership
         self.pos += self.vel * dt
-        
-        # Wrap around screen edges
-        if self.pos.x > WIDTH:
-            self.pos.x = 0
-        if self.pos.x < 0:
-            self.pos.x = WIDTH
-        if self.pos.y > HEIGHT:
-            self.pos.y = 0
-        if self.pos.y < 0:
-            self.pos.y = HEIGHT
-            
         self.rect.center = self.pos
         
         # Spawn enemy ships periodically
         now = pg.time.get_ticks()
         if now - self.last_spawn > ENEMY_SHIP_SPAWN_RATE:
             self.last_spawn = now
+            # Spawn an enemy ship
             EnemyShip(self.game, self.pos)
     
-    def take_damage(self, amount):
-        self.health -= amount
+    def take_damage(self, damage):
+        self.health -= damage
         if self.health <= 0:
-            # Create a large explosion
+            # Create explosion
             Explosion(self.game, self.pos, self.size)
-            self.kill()
             
-            # Add score
-            self.game.score += 100
+            # Signal to the game that a mothership was destroyed
+            self.game.mothership_destroyed()
+            
+            # Spawn two new motherships when destroyed
+            # Only spawn if there aren't too many motherships already
+            if len(self.game.motherships) < 3:  # Including this one that's about to be removed
+                # Spawn in different positions
+                pos1 = vec(self.pos.x + random.randint(-200, 200), 
+                           self.pos.y + random.randint(-200, 200))
+                pos2 = vec(self.pos.x + random.randint(-200, 200), 
+                           self.pos.y + random.randint(-200, 200))
+                
+                # Remove this mothership before spawning new ones
+                self.kill()
+                
+                # Spawn new motherships
+                MotherShip(self.game, pos1)
+                MotherShip(self.game, pos2)
+            else:
+                self.kill()
 
 
 class EnemyShip(pg.sprite.Sprite):
