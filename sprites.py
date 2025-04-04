@@ -436,15 +436,13 @@ class Laser(pg.sprite.Sprite):
                 hit.split()
 
         # Check for collisions with players (only if not the player who fired)
+        # Players are now immune to each other's weapons
         for player in self.game.players:
             if player != self.player:  # Don't hit the player who fired
                 if self.rect.colliderect(player.rect):
-                    player.take_damage(20)
-                    print(
-                        f"Player {player.player_num} hit by laser from Player {self.player.player_num}"
-                    )
-                    self.kill()
-                    break
+                    # No damage applied - players are immune to each other
+                    print(f"Laser from Player {self.player.player_num} passed through Player {player.player_num}")
+                    # Don't kill the laser or break - allow it to continue
 
 
 class Explosion(pg.sprite.Sprite):
@@ -488,11 +486,11 @@ class Asteroid(pg.sprite.Sprite):
         else:
             self.size = size
             
-        # Determine if this is a powerup asteroid (10% chance for new asteroids)
+        # Determine if this is a powerup asteroid (30% chance for new asteroids)
         self.has_powerup = False
         self.powerup_type = None
         if pos is None:  # Only for newly spawned asteroids, not splits
-            self.has_powerup = random.random() < 0.1  # 10% chance
+            self.has_powerup = random.random() < 0.3  # 30% chance
             if self.has_powerup:
                 self.powerup_type = random.choice(POWERUP_TYPES)
 

@@ -5,11 +5,27 @@ import pygame as pg
 
 from camera import Camera
 from settings import (
-    WIDTH, HEIGHT, FPS, TITLE, ASSET_FOLDER,
-    BLACK, WHITE, RED, GREEN, BLUE, YELLOW,
-    WORLD_WIDTH, WORLD_HEIGHT,
-    PLAYER1_START, PLAYER2_START, PLAYER1_CONTROLS, PLAYER2_CONTROLS,
-    POWERUP_TYPES, POWERUP_COLORS, POWERUP_SPAWN_CHANCE
+    ASSET_FOLDER,
+    ASTEROID_COUNT,
+    BLACK,
+    BLUE,
+    FPS,
+    GREEN,
+    HEIGHT,
+    PLAYER1_CONTROLS,
+    PLAYER1_START,
+    PLAYER2_CONTROLS,
+    PLAYER2_START,
+    POWERUP_COLORS,
+    POWERUP_SPAWN_CHANCE,
+    POWERUP_TYPES,
+    RED,
+    TITLE,
+    WHITE,
+    WIDTH,
+    WORLD_HEIGHT,
+    WORLD_WIDTH,
+    YELLOW,
 )
 from sprites import Asteroid, Explosion, MotherShip, Player, PowerUp
 
@@ -90,7 +106,7 @@ class Game:
         self.player2 = Player(self, PLAYER2_START, PLAYER2_CONTROLS, RED, 2)
 
         # Create asteroids
-        for _ in range(10):
+        for _ in range(ASTEROID_COUNT):
             Asteroid(self)
 
         # Initialize mothership spawn timer
@@ -169,20 +185,25 @@ class Game:
                 break
 
             # Check collision with players (can't hit yourself)
+            # Players are now immune to each other's weapons
             if laser in self.lasers_p1:
                 if pg.sprite.collide_rect(laser, self.player2) and self.player2.alive():
                     laser.kill()
-                    self.player2.health -= 10
-                    if self.player2.health <= 0:
-                        self.player2.kill()
-                        Explosion(self, self.player2.pos, self.player2.size)
+                    # No damage applied - players are immune to each other
+                    print("Laser from Player 1 passed through Player 2")
+                    # self.player2.health -= 10
+                    # if self.player2.health <= 0:
+                    #     self.player2.kill()
+                    #     Explosion(self, self.player2.pos, self.player2.size)
             elif laser in self.lasers_p2:
                 if pg.sprite.collide_rect(laser, self.player1) and self.player1.alive():
                     laser.kill()
-                    self.player1.health -= 10
-                    if self.player1.health <= 0:
-                        self.player1.kill()
-                        Explosion(self, self.player1.pos, self.player1.size)
+                    # No damage applied - players are immune to each other
+                    print("Laser from Player 2 passed through Player 1")
+                    # self.player1.health -= 10
+                    # if self.player1.health <= 0:
+                    #     self.player1.kill()
+                    #     Explosion(self, self.player1.pos, self.player1.size)
 
         # Check for collisions between players and asteroids
         for player in self.players:
@@ -274,9 +295,7 @@ class Game:
                 # Create a new asteroid at a random position away from players
                 self.spawn_asteroid_away_from_players()
 
-                print(
-                    f"Asteroid spawned. Current count: {len(self.asteroids)}"
-                )
+                print(f"Asteroid spawned. Current count: {len(self.asteroids)}")
 
     def spawn_asteroid_away_from_players(self):
         """Spawn an asteroid at a random position, but not too close to players"""
@@ -322,7 +341,9 @@ class Game:
             # Make the powerup more visible by increasing its size
             powerup_type = random.choice(POWERUP_TYPES)
             PowerUp(self, self.last_mothership_pos, powerup_type)
-            print(f"PowerUp {powerup_type} spawned at mothership position {self.last_mothership_pos}")
+            print(
+                f"PowerUp {powerup_type} spawned at mothership position {self.last_mothership_pos}"
+            )
 
         # Respawn player 1 if dead
         if not self.player1.alive():
@@ -364,10 +385,10 @@ class Game:
     def draw(self):
         # Game loop - render
         self.screen.fill(BLACK)
-        
+
         # Draw grid for reference
         self.draw_grid()
-        
+
         # Apply camera offset to all sprites
         for sprite in self.all_sprites:
             # Special handling for players to draw ghost ships when near boundaries
@@ -375,13 +396,13 @@ class Game:
                 sprite.draw(self.screen)
             else:
                 self.screen.blit(sprite.image, sprite.rect)
-        
+
         # Draw player health bars
         if self.player1.alive():
             self.draw_health_bar(self.screen, 10, 10, self.player1.health)
         if self.player2.alive():
             self.draw_health_bar(self.screen, WIDTH - 110, 10, self.player2.health)
-            
+
         # Draw player powerup indicators
         if self.player1.alive():
             # Draw powerup indicators for player 1
@@ -390,29 +411,60 @@ class Game:
                 self.draw_text("SHOTGUN", 20, POWERUP_COLORS["shotgun"], 60, y_offset)
                 y_offset += 25
             if self.player1.active_powerups["laser_stream"]:
-                self.draw_text("LASER STREAM", 20, POWERUP_COLORS["laser_stream"], 60, y_offset)
+                self.draw_text(
+                    "LASER STREAM", 20, POWERUP_COLORS["laser_stream"], 60, y_offset
+                )
                 y_offset += 25
             if self.player1.active_powerups["shield"]:
-                self.draw_text(f"SHIELD: {self.player1.shield_health}", 20, POWERUP_COLORS["shield"], 60, y_offset)
-                
+                self.draw_text(
+                    f"SHIELD: {self.player1.shield_health}",
+                    20,
+                    POWERUP_COLORS["shield"],
+                    60,
+                    y_offset,
+                )
+
         if self.player2.alive():
             # Draw powerup indicators for player 2
             y_offset = 40
             if self.player2.active_powerups["shotgun"]:
-                self.draw_text("SHOTGUN", 20, POWERUP_COLORS["shotgun"], WIDTH - 60, y_offset)
+                self.draw_text(
+                    "SHOTGUN", 20, POWERUP_COLORS["shotgun"], WIDTH - 60, y_offset
+                )
                 y_offset += 25
             if self.player2.active_powerups["laser_stream"]:
-                self.draw_text("LASER STREAM", 20, POWERUP_COLORS["laser_stream"], WIDTH - 60, y_offset)
+                self.draw_text(
+                    "LASER STREAM",
+                    20,
+                    POWERUP_COLORS["laser_stream"],
+                    WIDTH - 60,
+                    y_offset,
+                )
                 y_offset += 25
             if self.player2.active_powerups["shield"]:
-                self.draw_text(f"SHIELD: {self.player2.shield_health}", 20, POWERUP_COLORS["shield"], WIDTH - 60, y_offset)
-        
+                self.draw_text(
+                    f"SHIELD: {self.player2.shield_health}",
+                    20,
+                    POWERUP_COLORS["shield"],
+                    WIDTH - 60,
+                    y_offset,
+                )
+
         # Draw score
-        self.draw_text(f"Score: {self.score}", 30, WHITE, WIDTH // 2, 10, align="center")
-        
+        self.draw_text(
+            f"Score: {self.score}", 30, WHITE, WIDTH // 2, 10, align="center"
+        )
+
         # Draw FPS
-        self.draw_text(f"FPS: {int(self.clock.get_fps())}", 20, WHITE, WIDTH - 50, HEIGHT - 20, align="right")
-        
+        self.draw_text(
+            f"FPS: {int(self.clock.get_fps())}",
+            20,
+            WHITE,
+            WIDTH - 50,
+            HEIGHT - 20,
+            align="right",
+        )
+
         # Update display
         pg.display.flip()
 
