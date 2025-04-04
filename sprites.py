@@ -326,7 +326,19 @@ class Player(pg.sprite.Sprite):
         """Check if player has collected any powerups"""
         hits = pg.sprite.spritecollide(self, self.game.powerups, True)
         for powerup in hits:
+            # Apply to self
             self.apply_powerup(powerup.type)
+            
+            # Share with other player
+            other_player = None
+            if self.player_num == 1 and self.game.player2.alive():
+                other_player = self.game.player2
+            elif self.player_num == 2 and self.game.player1.alive():
+                other_player = self.game.player1
+                
+            if other_player:
+                other_player.apply_powerup(powerup.type)
+                print(f"Powerup {powerup.type} shared with Player {other_player.player_num}")
 
     def apply_powerup(self, powerup_type):
         """Apply the effect of a collected powerup"""
@@ -355,6 +367,20 @@ class Player(pg.sprite.Sprite):
             print(
                 f"Player {self.player_num} activated shield powerup. Shield health: {self.shield_health}"
             )
+
+    def copy_powerups_from(self, other_player):
+        """Copy all active powerups from another player"""
+        if other_player and other_player.alive():
+            # Copy all active powerups
+            for powerup_type, active in other_player.active_powerups.items():
+                if active:
+                    self.active_powerups[powerup_type] = True
+                    print(f"Player {self.player_num} received {powerup_type} "
+                          f"powerup from Player {other_player.player_num}")
+            
+            # Copy shield health if shield is active
+            if other_player.active_powerups["shield"]:
+                self.shield_health = other_player.shield_health
 
 
 class Laser(pg.sprite.Sprite):
@@ -654,17 +680,71 @@ class MotherShip(pg.sprite.Sprite):
         if pos:
             self.pos = vec(pos)
         else:
-            # Spawn at a random edge of the screen
+            # Calculate the camera's current view area
+            if game.player1.alive() and game.player2.alive():
+                # If both players are alive, get the midpoint
+                midpoint_x = (game.player1.pos.x + game.player2.pos.x) / 2
+                midpoint_y = (game.player1.pos.y + game.player2.pos.y) / 2
+            elif game.player1.alive():
+                midpoint_x = game.player1.pos.x
+                midpoint_y = game.player1.pos.y
+            elif game.player2.alive():
+                midpoint_x = game.player2.pos.x
+                midpoint_y = game.player2.pos.y
+            else:
+                # Default to center of the world if no players alive
+                midpoint_x = WORLD_WIDTH / 2
+                midpoint_y = WORLD_HEIGHT / 2
+            
+            # Calculate the current viewable area boundaries
+            view_left = max(0, midpoint_x - WIDTH / 2)
+            view_right = min(WORLD_WIDTH, midpoint_x + WIDTH / 2)
+            view_top = max(0, midpoint_y - HEIGHT / 2)
+            view_bottom = min(WORLD_HEIGHT, midpoint_y + HEIGHT / 2)
+            
+            # Use the entire viewable area width/height as the minimum spawn distance
+            # This ensures motherships spawn at least a full screen away from players
+            buffer_x = WIDTH  # Full screen width as buffer
+            buffer_y = HEIGHT  # Full screen height as buffer
+            
+            # Choose a spawn position outside the viewable area but within the world
             side = random.randint(0, 3)
+            
             if side == 0:  # Top
-                self.pos = vec(random.randint(0, WIDTH), -self.size)
+                self.pos = vec(
+                    random.randint(int(view_left), int(view_right)),
+                    max(0, view_top - buffer_y)
+                )
+                # If too close to top of world, spawn at bottom instead
+                if self.pos.y < 0:
+                    self.pos.y = min(WORLD_HEIGHT, view_bottom + buffer_y)
             elif side == 1:  # Right
-                self.pos = vec(WIDTH + self.size, random.randint(0, HEIGHT))
+                self.pos = vec(
+                    min(WORLD_WIDTH, view_right + buffer_x),
+                    random.randint(int(view_top), int(view_bottom))
+                )
+                # If too close to right edge of world, spawn at left instead
+                if self.pos.x > WORLD_WIDTH:
+                    self.pos.x = max(0, view_left - buffer_x)
             elif side == 2:  # Bottom
-                self.pos = vec(random.randint(0, WIDTH), HEIGHT + self.size)
+                self.pos = vec(
+                    random.randint(int(view_left), int(view_right)),
+                    min(WORLD_HEIGHT, view_bottom + buffer_y)
+                )
+                # If too close to bottom of world, spawn at top instead
+                if self.pos.y > WORLD_HEIGHT:
+                    self.pos.y = max(0, view_top - buffer_y)
             else:  # Left
-                self.pos = vec(-self.size, random.randint(0, HEIGHT))
-
+                self.pos = vec(
+                    max(0, view_left - buffer_x),
+                    random.randint(int(view_top), int(view_bottom))
+                )
+                # If too close to left edge of world, spawn at right instead
+                if self.pos.x < 0:
+                    self.pos.x = min(WORLD_WIDTH, view_right + buffer_x)
+            
+            print(f"Mothership spawned at [{int(self.pos.x)}, {int(self.pos.y)}]")
+            
         self.vel = vec(0, 0)
         self.acc = vec(0, 0)
         self.rect.center = self.pos

@@ -1,15 +1,34 @@
 import pygame as pg
+pg.init()  # pylint: disable=no-member
 
 # Game options/settings
 TITLE = "Asteroid Duel"
-WIDTH = 1024  # Game window width
-HEIGHT = 768  # Game window height
+
+# Get the screen info to set dynamic resolution
+screen_info = pg.display.Info()
+WIDTH = screen_info.current_w  # Use current screen width
+HEIGHT = screen_info.current_h  # Use current screen height
+print(f"Detected screen resolution: {WIDTH}x{HEIGHT}")
+
+# Option to use fullscreen or windowed mode
+FULLSCREEN = False  # Set to True for fullscreen mode
+
+# If not using fullscreen, use a reasonable default size that fits most screens
+if not FULLSCREEN:
+    # Use 80% of the screen size for windowed mode
+    WIDTH = int(WIDTH * 0.8)
+    HEIGHT = int(HEIGHT * 0.8)
+    print(f"Using windowed mode with resolution: {WIDTH}x{HEIGHT}")
+
 FPS = 60
 
 # World Size Multiplier (reduced from 10x to 3x for better visibility)
 WORLD_MULTIPLIER = 3
 WORLD_WIDTH = WIDTH * WORLD_MULTIPLIER
 WORLD_HEIGHT = HEIGHT * WORLD_MULTIPLIER
+
+# Player respawn settings
+PLAYER_RESPAWN_SAFE_DISTANCE = 200  # Minimum distance from enemies when respawning
 
 # Define Colors
 WHITE = (255, 255, 255)

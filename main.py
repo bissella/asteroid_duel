@@ -10,12 +10,14 @@ from settings import (
     BLACK,
     BLUE,
     FPS,
+    FULLSCREEN,
     GREEN,
     HEIGHT,
     PLAYER1_CONTROLS,
     PLAYER1_START,
     PLAYER2_CONTROLS,
     PLAYER2_START,
+    PLAYER_RESPAWN_SAFE_DISTANCE,
     POWERUP_COLORS,
     POWERUP_SPAWN_CHANCE,
     POWERUP_TYPES,
@@ -36,7 +38,15 @@ class Game:
     def __init__(self):
         # Initialize pygame and create window
         pg.init()
-        self.screen = pg.display.set_mode((WIDTH, HEIGHT))  # pylint: disable=no-member
+        
+        # Set up the display based on settings
+        if FULLSCREEN:
+            self.screen = pg.display.set_mode((WIDTH, HEIGHT), pg.FULLSCREEN)
+            print("Game running in fullscreen mode")
+        else:
+            self.screen = pg.display.set_mode((WIDTH, HEIGHT))
+            print(f"Game running in windowed mode: {WIDTH}x{HEIGHT}")
+            
         pg.display.set_caption(TITLE)
         self.clock = pg.time.Clock()
         self.running = True
@@ -226,11 +236,38 @@ class Game:
             hits = pg.sprite.spritecollide(player, self.enemies, False)
             for hit in hits:
                 if isinstance(hit, MotherShip):
-                    player.health -= 30
-                    hit.take_damage(50)  # Player collision damages mothership
+                    # Check if player has an active shield
+                    if player.active_powerups["shield"]:
+                        print(f"Player {player.player_num}'s shield protected from mothership collision!")
+                        # Shield protects from damage but is removed after mothership collision
+                        player.active_powerups["shield"] = False
+                        player.shield_health = 0
+                        # Create shield break effect
+                        for _ in range(5):
+                            Explosion(self, player.pos, random.randint(10, 20))
+                    else:
+                        # No shield, player takes damage
+                        player.health -= 30
+                    
+                    # Player collision still damages mothership
+                    hit.take_damage(50)
                 else:
-                    player.health -= 10
-                    hit.take_damage(100)  # Enemy ship destroyed on player collision
+                    # For regular enemy ships
+                    if player.active_powerups["shield"]:
+                        # Shield absorbs damage from regular enemies
+                        player.shield_health -= 10
+                        print(f"Player {player.player_num}'s shield absorbed enemy collision. Shield health: {player.shield_health}")
+                        
+                        # If shield is depleted, remove it
+                        if player.shield_health <= 0:
+                            player.active_powerups["shield"] = False
+                            print(f"Player {player.player_num}'s shield depleted from enemy collision")
+                    else:
+                        # No shield, player takes damage
+                        player.health -= 10
+                    
+                    # Enemy ship destroyed on player collision
+                    hit.take_damage(100)
 
                 if player.health <= 0:
                     player.kill()
@@ -345,15 +382,20 @@ class Game:
                 f"PowerUp {powerup_type} spawned at mothership position {self.last_mothership_pos}"
             )
 
+        # Find a safe spawn position away from the mothership's last position
+        safe_spawn_pos = self.find_safe_spawn_position()
+
         # Respawn player 1 if dead
         if not self.player1.alive():
             print("Respawning Player 1")
-            # Create a new player at a random position near the center
+            # Create a new player at the safe position with a small random offset
             spawn_pos = pg.math.Vector2(
-                WIDTH / 2 + random.randint(-100, 100),
-                HEIGHT / 2 + random.randint(-100, 100),
+                safe_spawn_pos.x + random.randint(-50, 50),
+                safe_spawn_pos.y + random.randint(-50, 50),
             )
             self.player1 = Player(self, spawn_pos, PLAYER1_CONTROLS, GREEN, 1)
+            print("Copying powerups from Player 2 to Player 1")
+            self.player1.copy_powerups_from(self.player2)
 
             # Create a respawn effect
             for _ in range(3):
@@ -362,16 +404,87 @@ class Game:
         # Respawn player 2 if dead
         if not self.player2.alive():
             print("Respawning Player 2")
-            # Create a new player at a random position near the center
+            # Create a new player at the safe position with a small random offset
             spawn_pos = pg.math.Vector2(
-                WIDTH / 2 + random.randint(-100, 100),
-                HEIGHT / 2 + random.randint(-100, 100),
+                safe_spawn_pos.x + random.randint(-50, 50),
+                safe_spawn_pos.y + random.randint(-50, 50),
             )
             self.player2 = Player(self, spawn_pos, PLAYER2_CONTROLS, RED, 2)
+            print("Copying powerups from Player 1 to Player 2")
+            self.player2.copy_powerups_from(self.player1)
 
             # Create a respawn effect
             for _ in range(3):
                 Explosion(self, spawn_pos, random.randint(20, 40))
+
+    def find_safe_spawn_position(self):
+        """
+        Find a safe position to respawn players within the viewable area but away from enemies.
+        Will attempt multiple times to find a suitable position.
+        """
+        # Get the current camera view boundaries
+        if self.player1.alive() and self.player2.alive():
+            # If both players are alive, center is between them
+            center_x = (self.player1.pos.x + self.player2.pos.x) / 2
+            center_y = (self.player1.pos.y + self.player2.pos.y) / 2
+        elif self.player1.alive():
+            # If only player 1 is alive, center on them
+            center_x = self.player1.pos.x
+            center_y = self.player1.pos.y
+        elif self.player2.alive():
+            # If only player 2 is alive, center on them
+            center_x = self.player2.pos.x
+            center_y = self.player2.pos.y
+        else:
+            # Default to center of the world if no players alive
+            center_x = WORLD_WIDTH / 2
+            center_y = WORLD_HEIGHT / 2
+        
+        # Calculate the current viewable area boundaries
+        view_left = max(0, center_x - WIDTH / 2)
+        view_right = min(WORLD_WIDTH, center_x + WIDTH / 2)
+        view_top = max(0, center_y - HEIGHT / 2)
+        view_bottom = min(WORLD_HEIGHT, center_y + HEIGHT / 2)
+        
+        # Try to find a safe position within the viewable area
+        max_attempts = 50  # Maximum number of attempts to find a safe position
+        for attempt in range(max_attempts):
+            # Generate a random position within the viewable area
+            x = random.uniform(view_left + 50, view_right - 50)
+            y = random.uniform(view_top + 50, view_bottom - 50)
+            test_pos = pg.math.Vector2(x, y)
+            
+            # Check if this position is safe (away from motherships and enemies)
+            is_safe = True
+            
+            # Check distance from motherships
+            for mothership in self.motherships:
+                if test_pos.distance_to(mothership.pos) < PLAYER_RESPAWN_SAFE_DISTANCE:
+                    is_safe = False
+                    break
+            
+            # Check distance from enemy ships
+            if is_safe:
+                for enemy in self.enemies:
+                    if test_pos.distance_to(enemy.pos) < PLAYER_RESPAWN_SAFE_DISTANCE:
+                        is_safe = False
+                        break
+            
+            # Check distance from asteroids
+            if is_safe:
+                for asteroid in self.asteroids:
+                    if test_pos.distance_to(asteroid.pos) < PLAYER_RESPAWN_SAFE_DISTANCE / 2:  # Less strict for asteroids
+                        is_safe = False
+                        break
+            
+            # If we found a safe position, return it
+            if is_safe:
+                print(f"Found safe spawn position at {test_pos} on attempt {attempt+1}")
+                return test_pos
+        
+        # If we couldn't find a safe position after max attempts, use the center of the viewable area
+        print(f"Could not find safe spawn position after {max_attempts} attempts, using center of view")
+        return pg.math.Vector2((view_left + view_right) / 2, (view_top + view_bottom) / 2)
 
     def events(self):
         # Game Loop - Events
@@ -397,22 +510,27 @@ class Game:
             else:
                 self.screen.blit(sprite.image, sprite.rect)
 
+        # Calculate UI positions based on screen size
+        margin = int(WIDTH * 0.01)  # 1% of screen width as margin
+        health_bar_width = int(WIDTH * 0.1)  # 10% of screen width
+        
         # Draw player health bars
         if self.player1.alive():
-            self.draw_health_bar(self.screen, 10, 10, self.player1.health)
+            self.draw_health_bar(self.screen, margin, margin, self.player1.health, health_bar_width)
         if self.player2.alive():
-            self.draw_health_bar(self.screen, WIDTH - 110, 10, self.player2.health)
+            self.draw_health_bar(self.screen, WIDTH - margin - health_bar_width, margin, self.player2.health, health_bar_width)
 
         # Draw player powerup indicators
         if self.player1.alive():
             # Draw powerup indicators for player 1
-            y_offset = 40
+            y_offset = margin + 30
+            powerup_x = margin + health_bar_width // 2
             if self.player1.active_powerups["shotgun"]:
-                self.draw_text("SHOTGUN", 20, POWERUP_COLORS["shotgun"], 60, y_offset)
+                self.draw_text("SHOTGUN", 20, POWERUP_COLORS["shotgun"], powerup_x, y_offset)
                 y_offset += 25
             if self.player1.active_powerups["laser_stream"]:
                 self.draw_text(
-                    "LASER STREAM", 20, POWERUP_COLORS["laser_stream"], 60, y_offset
+                    "LASER STREAM", 20, POWERUP_COLORS["laser_stream"], powerup_x, y_offset
                 )
                 y_offset += 25
             if self.player1.active_powerups["shield"]:
@@ -420,16 +538,17 @@ class Game:
                     f"SHIELD: {self.player1.shield_health}",
                     20,
                     POWERUP_COLORS["shield"],
-                    60,
+                    powerup_x,
                     y_offset,
                 )
 
         if self.player2.alive():
             # Draw powerup indicators for player 2
-            y_offset = 40
+            y_offset = margin + 30
+            powerup_x = WIDTH - margin - health_bar_width // 2
             if self.player2.active_powerups["shotgun"]:
                 self.draw_text(
-                    "SHOTGUN", 20, POWERUP_COLORS["shotgun"], WIDTH - 60, y_offset
+                    "SHOTGUN", 20, POWERUP_COLORS["shotgun"], powerup_x, y_offset, align="right"
                 )
                 y_offset += 25
             if self.player2.active_powerups["laser_stream"]:
@@ -437,8 +556,9 @@ class Game:
                     "LASER STREAM",
                     20,
                     POWERUP_COLORS["laser_stream"],
-                    WIDTH - 60,
+                    powerup_x,
                     y_offset,
+                    align="right"
                 )
                 y_offset += 25
             if self.player2.active_powerups["shield"]:
@@ -446,13 +566,14 @@ class Game:
                     f"SHIELD: {self.player2.shield_health}",
                     20,
                     POWERUP_COLORS["shield"],
-                    WIDTH - 60,
+                    powerup_x,
                     y_offset,
+                    align="right"
                 )
 
         # Draw score
         self.draw_text(
-            f"Score: {self.score}", 30, WHITE, WIDTH // 2, 10, align="center"
+            f"Score: {self.score}", 30, WHITE, WIDTH // 2, margin, align="center"
         )
 
         # Draw FPS
@@ -460,8 +581,8 @@ class Game:
             f"FPS: {int(self.clock.get_fps())}",
             20,
             WHITE,
-            WIDTH - 50,
-            HEIGHT - 20,
+            WIDTH - margin,
+            HEIGHT - margin,
             align="right",
         )
 
@@ -484,12 +605,11 @@ class Game:
                     self.screen, (20, 20, 20), (0, y_screen), (WIDTH, y_screen)
                 )
 
-    def draw_health_bar(self, screen, x, y, health):
+    def draw_health_bar(self, screen, x, y, health, width):
         """Draw a health bar at the specified position"""
-        BAR_WIDTH = 100
         BAR_HEIGHT = 10
-        fill = (health / 100) * BAR_WIDTH
-        outline_rect = pg.Rect(x, y, BAR_WIDTH, BAR_HEIGHT)
+        fill = (health / 100) * width
+        outline_rect = pg.Rect(x, y, width, BAR_HEIGHT)
         fill_rect = pg.Rect(x, y, fill, BAR_HEIGHT)
         pg.draw.rect(screen, RED, fill_rect)
         pg.draw.rect(screen, WHITE, outline_rect, 2)
