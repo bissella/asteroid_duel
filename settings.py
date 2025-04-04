@@ -1,15 +1,34 @@
 import pygame as pg
+pg.init()  # pylint: disable=no-member
 
 # Game options/settings
 TITLE = "Asteroid Duel"
-WIDTH = 1024  # Game window width
-HEIGHT = 768  # Game window height
+
+# Get the screen info to set dynamic resolution
+screen_info = pg.display.Info()
+WIDTH = screen_info.current_w  # Use current screen width
+HEIGHT = screen_info.current_h  # Use current screen height
+print(f"Detected screen resolution: {WIDTH}x{HEIGHT}")
+
+# Option to use fullscreen or windowed mode
+FULLSCREEN = False  # Set to True for fullscreen mode
+
+# If not using fullscreen, use a reasonable default size that fits most screens
+if not FULLSCREEN:
+    # Use 80% of the screen size for windowed mode
+    WIDTH = int(WIDTH * 0.8)
+    HEIGHT = int(HEIGHT * 0.8)
+    print(f"Using windowed mode with resolution: {WIDTH}x{HEIGHT}")
+
 FPS = 60
 
 # World Size Multiplier (reduced from 10x to 3x for better visibility)
 WORLD_MULTIPLIER = 3
 WORLD_WIDTH = WIDTH * WORLD_MULTIPLIER
 WORLD_HEIGHT = HEIGHT * WORLD_MULTIPLIER
+
+# Player respawn settings
+PLAYER_RESPAWN_SAFE_DISTANCE = 200  # Minimum distance from enemies when respawning
 
 # Define Colors
 WHITE = (255, 255, 255)
@@ -53,7 +72,7 @@ LASER_MAX_COOLDOWN = 1000  # Maximum delay
 LASER_IMG = "laserBlue01.png"  # Placeholder
 
 # Asteroid settings
-NUM_ASTEROIDS = 15
+# NUM_ASTEROIDS = 1000
 ASTEROID_SIZE_MIN = 20
 ASTEROID_SIZE_MAX = 50
 ASTEROID_SPEED_MAX = 100
@@ -62,8 +81,48 @@ ASTEROID_SPAWN_PADDING = 100  # Min distance from edge or player to spawn
 ASTEROID_COUNT = 8  # Initial number of asteroids
 ASTEROID_IMG = "meteorBrown_med1.png"  # Placeholder image
 
+# Enemy ship settings
+MOTHERSHIP_SIZE = 50
+MOTHERSHIP_HEALTH = 500
+MOTHERSHIP_ACC = 50  # Less nimble than player ships
+MOTHERSHIP_FRICTION = -0.05
+MOTHERSHIP_SPAWN_DELAY = 30000  # 30 seconds between mothership spawns
+MOTHERSHIP_SPAWN_CHANCE = 0.1  # 30% chance to spawn a mothership when timer expires
+
+ENEMY_SHIP_SIZE = 20
+ENEMY_SHIP_HEALTH = 30
+ENEMY_SHIP_ACC = 150
+ENEMY_SHIP_FRICTION = -0.1
+ENEMY_SHIP_DAMAGE = 10
+ENEMY_SHIP_SPAWN_RATE = 3000  # Spawn a new enemy every 3 seconds from mothership
+ENEMY_SWARM_DISTANCE = 200  # Distance at which enemy ships start swarming players
+ENEMY_MAX_SPEED = 200
+ENEMY_COLOR = (255, 100, 0)  # Orange
+MOTHERSHIP_COLOR = (255, 50, 50)  # Red
+
 # Explosion settings
 EXPLOSION_DURATION = 500  # milliseconds for the primitive explosion
+
+# PowerUp settings
+POWERUP_SIZE = 20
+POWERUP_DURATION = 20000  # 20 seconds for temporary powerups
+POWERUP_TYPES = ["health", "shotgun", "laser_stream", "shield"]
+POWERUP_COLORS = {
+    "health": (0, 255, 0),  # Green
+    "shotgun": (255, 165, 0),  # Orange
+    "laser_stream": (0, 191, 255),  # Deep Sky Blue
+    "shield": (138, 43, 226),  # Blue Violet
+}
+POWERUP_SPAWN_CHANCE = {
+    "asteroid": 1.0,  # 10% chance from asteroid
+    "mothership": 1.0,  # 100% chance from mothership
+}
+POWERUP_LIFETIME = (
+    10000  # How long a powerup stays on screen before disappearing (10 seconds)
+)
+POWERUP_SHOTGUN_SPREAD = 15  # Angle in degrees between shotgun lasers
+POWERUP_LASER_STREAM_DELAY = 100  # Delay between laser stream shots in milliseconds
+POWERUP_SHIELD_HEALTH = 50  # Additional health provided by shield
 
 # Boundary
 BOUNDARY_COLOR = RED
