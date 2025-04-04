@@ -203,7 +203,13 @@ class Player(pg.sprite.Sprite):
         # Handle shooting based on powerups
         now = pg.time.get_ticks()
         if keys[self.player_controls["fire"]]:
-            if self.active_powerups["shotgun"]:
+            # Modified to allow multiple powerups to be active simultaneously
+            if self.active_powerups["shotgun"] and self.active_powerups["laser_stream"]:
+                # If both powerups are active, fire both with a slight delay between them
+                self.fire_shotgun(now)
+                # Small delay to prevent exact overlap of sound effects
+                self.fire_laser_stream(now + 50)
+            elif self.active_powerups["shotgun"]:
                 self.fire_shotgun(now)
             elif self.active_powerups["laser_stream"]:
                 self.fire_laser_stream(now)
@@ -333,17 +339,13 @@ class Player(pg.sprite.Sprite):
             )
 
         elif powerup_type == "shotgun":
-            # Enable shotgun mode
+            # Enable shotgun mode - no longer disables other weapon powerups
             self.active_powerups["shotgun"] = True
-            self.active_powerups["laser_stream"] = (
-                False  # Disable other weapon powerups
-            )
             print(f"Player {self.player_num} activated shotgun powerup")
 
         elif powerup_type == "laser_stream":
-            # Enable laser stream mode
+            # Enable laser stream mode - no longer disables other weapon powerups
             self.active_powerups["laser_stream"] = True
-            self.active_powerups["shotgun"] = False  # Disable other weapon powerups
             print(f"Player {self.player_num} activated laser stream powerup")
 
         elif powerup_type == "shield":
@@ -485,6 +487,14 @@ class Asteroid(pg.sprite.Sprite):
             self.size = random.randint(20, 50)
         else:
             self.size = size
+            
+        # Determine if this is a powerup asteroid (10% chance for new asteroids)
+        self.has_powerup = False
+        self.powerup_type = None
+        if pos is None:  # Only for newly spawned asteroids, not splits
+            self.has_powerup = random.random() < 0.1  # 10% chance
+            if self.has_powerup:
+                self.powerup_type = random.choice(POWERUP_TYPES)
 
         # Create a circular asteroid
         self.original_image = pg.Surface((self.size, self.size), flags=SRCALPHA)
@@ -510,6 +520,16 @@ class Asteroid(pg.sprite.Sprite):
                 pg.draw.circle(
                     self.original_image, (100, 100, 100), (int(x), int(y)), radius
                 )
+                
+        # If it's a powerup asteroid, add a pink center
+        if self.has_powerup:
+            # Draw a pink center to indicate it contains a powerup
+            pg.draw.circle(
+                self.original_image,
+                (255, 105, 180),  # Hot pink
+                (self.size // 2, self.size // 2),
+                self.size // 4,  # Center is 1/4 the size of the asteroid
+            )
 
         # Add a white outline to make the asteroid more visible
         pg.draw.circle(
@@ -566,6 +586,20 @@ class Asteroid(pg.sprite.Sprite):
 
     def split(self):
         """Split the asteroid into two smaller ones if it's large enough"""
+        # If this asteroid has a powerup, spawn it instead of splitting
+        if self.has_powerup:
+            # Create a powerup at the asteroid's position
+            PowerUp(self.game, self.pos, self.powerup_type)
+            print(f"PowerUp {self.powerup_type} released from asteroid at {self.pos}")
+            
+            # Create a small explosion
+            Explosion(self.game, self.pos, self.size // 2)
+            
+            # Remove this asteroid
+            self.kill()
+            return
+            
+        # Normal asteroid splitting behavior
         if self.size > 15:  # Only split if the asteroid is big enough
             # Create two smaller asteroids
             for _ in range(2):
@@ -581,8 +615,8 @@ class Asteroid(pg.sprite.Sprite):
             # Remove this asteroid
             self.kill()
         else:
-            # If too small, just create an explosion and remove
-            Explosion(self.game, self.pos, self.size)
+            # Too small to split, just remove it
+            Explosion(self.game, self.pos, self.size // 2)
             self.kill()
 
 
