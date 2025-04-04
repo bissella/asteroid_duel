@@ -63,7 +63,7 @@ ASTEROID_COUNT = 8  # Initial number of asteroids
 ASTEROID_IMG = "meteorBrown_med1.png"  # Placeholder image
 
 # Enemy ship settings
-MOTHERSHIP_SIZE = 100
+MOTHERSHIP_SIZE = 50
 MOTHERSHIP_HEALTH = 500
 MOTHERSHIP_ACC = 50  # Less nimble than player ships
 MOTHERSHIP_FRICTION = -0.05

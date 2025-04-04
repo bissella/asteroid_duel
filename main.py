@@ -8,7 +8,7 @@ from settings import (
     WIDTH, HEIGHT, FPS, TITLE, ASSET_FOLDER,
     BLACK, WHITE, RED, GREEN, BLUE, YELLOW,
     WORLD_WIDTH, WORLD_HEIGHT,
-    PLAYER1_START, PLAYER2_START,
+    PLAYER1_START, PLAYER2_START, PLAYER1_CONTROLS, PLAYER2_CONTROLS,
     POWERUP_TYPES, POWERUP_COLORS, POWERUP_SPAWN_CHANCE
 )
 from sprites import Asteroid, Explosion, MotherShip, Player, PowerUp
@@ -85,25 +85,9 @@ class Game:
         self.motherships = pg.sprite.Group()
         self.powerups = pg.sprite.Group()  # Initialize powerups group
 
-        # Create player objects
-        player1_controls = {
-            'up': pg.K_w,
-            'down': pg.K_s,
-            'left': pg.K_a,
-            'right': pg.K_d,
-            'fire': pg.K_SPACE
-        }
-        
-        player2_controls = {
-            'up': pg.K_UP,
-            'down': pg.K_DOWN,
-            'left': pg.K_LEFT,
-            'right': pg.K_RIGHT,
-            'fire': pg.K_RCTRL
-        }
-        
-        self.player1 = Player(self, PLAYER1_START, player1_controls, GREEN, 1)
-        self.player2 = Player(self, PLAYER2_START, player2_controls, RED, 2)
+        # Create player objects - use the controls from settings.py
+        self.player1 = Player(self, PLAYER1_START, PLAYER1_CONTROLS, GREEN, 1)
+        self.player2 = Player(self, PLAYER2_START, PLAYER2_CONTROLS, RED, 2)
 
         # Create asteroids
         for _ in range(10):
@@ -348,14 +332,7 @@ class Game:
                 WIDTH / 2 + random.randint(-100, 100),
                 HEIGHT / 2 + random.randint(-100, 100),
             )
-            player1_controls = {
-                'up': pg.K_w,
-                'down': pg.K_s,
-                'left': pg.K_a,
-                'right': pg.K_d,
-                'fire': pg.K_SPACE
-            }
-            self.player1 = Player(self, spawn_pos, player1_controls, GREEN, 1)
+            self.player1 = Player(self, spawn_pos, PLAYER1_CONTROLS, GREEN, 1)
 
             # Create a respawn effect
             for _ in range(3):
@@ -369,14 +346,7 @@ class Game:
                 WIDTH / 2 + random.randint(-100, 100),
                 HEIGHT / 2 + random.randint(-100, 100),
             )
-            player2_controls = {
-                'up': pg.K_UP,
-                'down': pg.K_DOWN,
-                'left': pg.K_LEFT,
-                'right': pg.K_RIGHT,
-                'fire': pg.K_RCTRL
-            }
-            self.player2 = Player(self, spawn_pos, player2_controls, RED, 2)
+            self.player2 = Player(self, spawn_pos, PLAYER2_CONTROLS, RED, 2)
 
             # Create a respawn effect
             for _ in range(3):
